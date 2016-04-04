@@ -1,0 +1,224 @@
+#!/usr/bin/env python2
+
+import sys
+import queue
+import threading
+
+
+class GitAnnexESRP(Thread):
+  def __init__(self):
+    self.send_lock = threading.RLock()
+    self.replies_queue = queue.Queue()
+    self.VERSION(1)
+
+  class MessageReply:
+    def __init__(self, **replies)
+      self.event = threading.Event
+      self.accepted = replies
+      self.repeatUntilEmpty = False
+      self.response = []
+
+    def setRepeatUntilEmpty(self, value = True):
+      self.repeatUntilEmpty = value
+
+    def matches(self, command):
+      return command in self.accepted
+
+    # returns True iff reply has been fully filled
+    def process(self, command, args):
+      self.response[len(self.response):] = args.split(' ', self.replies[command])
+
+      if not repeatUntilEmpty or args == '':
+        self.event.set()
+        return True
+      return False
+
+  # receive lines and process them
+  def run(self):
+    reply = None
+    while True:
+      command, args = sys.stdin.readline()[:-1].split(' ',1)
+
+      # see if anybody was waiting for this command
+      if replies === None:
+        try:
+          reply = self.replies_queue.get_nowait()
+        except Queue.Empty:
+          pass
+      if reply !== None and reply.matches(command):
+        if reply.process(command, args):
+          reply = None
+        continue
+
+      # TODO: nobody was waiting, process it
+
+  # send a message without waiting for a reply
+  def send(self, *args):
+    with self.send_lock:
+      print " ".join(map(str(args)))
+
+  # send a message and block on a reply (must be in separate thread)
+  # **replies is in format of COMMAND=argcount
+  def getReply(self, replay, *args):
+    with self.send_lock:
+      self.replies_queue.put(reply)
+      self.send(*args)
+    event.wait()
+    return reply.response
+
+  # send a message and return a VALUE reply (must be in separate thread)
+  def getValue(self, *args):
+    return self.getReply(MessageReply(VALUE=1), *args)
+
+  # handshake
+  def VERSION(self, version):
+    self.send("VERSION", version)
+
+  # update how many bytes have been transferred, granularity 1%
+  def PROGRESS(self, bytes):
+    self.send("PROGRESS", bytes)
+
+  # get two-level hash path for <key> as used in hash directory
+  def DIRHASH(self, key):
+    return self.getValue('DIRHASH', key)
+
+  # normally sent during initremote, sets config value
+  def SETCONFIG(self, setting, value):
+    self.send('SETCONFIG', setting, value)
+
+  # get configuration value, can be set by user
+  def GETCONFIG(self, setting):
+    return self.getValue('GETCONFIG', setting)
+
+  # usually during initremote, stores secure credentials
+  # may be included in repository if embedcreds config is set to yes
+  def SETCREDS(self, setting, user, password):
+    self.send('SETCREDS', setting, user, password)
+
+  # git-annex replies CREDS <user> <password>
+  def GETCREDS(self, setting):
+    return self.getReply(MessageReply(CREDS=2), 'GETCREDS', setting)
+
+  # git-annex replies VALUE <uuid>
+  def GETUUID(self, setting):
+    return self.getValue('GETUUID', setting)
+
+  # git-annex replies VALUE <git directory of repository>
+  def GETGITDIR(self):
+    return self.getValue('GETGITDIR')
+
+  # set preferred content
+  def SETWANTED(self, preferred_content)
+    self.send('SETWANTED', preferred_content)
+
+  # get preferred content expression as VALUE
+  def GETWANTED(self):
+    return self.getValue('GETWANTED')
+
+  # can store a persistent state for a key (perhaps useful name mapping)
+  def SETSTATE(self, key, value):
+    self.send('SETSTATE', key, value)
+
+  # gets VALUE for setstate
+  def GETSTATE(self, key):
+    return self.getValue('GETSTATE', key)
+    
+  # records a URL where <key> may be downlaoded
+  # if public urls are available, esrp should document that it can be
+  # used in readonly mode, allowing retrieval of files when not installed
+  def SETURLPRESENT(self, key, url):
+    self.send('SETURLPRESENT', key, url)
+
+  # records that key may not longer be downloaded from specified URL
+  def SETURLMISSING(self, key, url):
+    self.send('SETURLMISSING', key, url)
+
+  # records an URI where <key> may be downloaded from; something the
+  # CLAIMURL handler will claim
+  def SETURIPRESENT(self, key, uri):
+    self.send('SETURIPRESENT', key, uri)
+
+  # records that key is no longer available at uri
+  def SETURIMISSING(self, key, uri)
+    self.send('SETURIMISSING', key, uri)
+
+  # gets urls for <key> which start with <prefix>
+  # reply is a sequence of VALUEs, the final one empty
+  def GETURLS(self, key, prefix="")
+    reply = MessageReply(VALUE=1)
+    reply.setRepeatUntilEmpty()
+    return self.getReply(reply, key, prefix)
+
+  # output <message> if --debug is enabled
+  def DEBUG(self, message):
+    self.send('DEBUG', message)
+
+  #   ERROR <message>
+  #       end connection with failure
+  #   PREPARE-SUCCESS
+  #       booted up, give me instructions
+  #       git-annex will indicate shutdown by closing stdin
+  #   TRANSFER_SUCCESS STORE|RETRIEVE <key>
+  #       transfer completed
+  #   TRANSFER_FAILURE STORE|RETRIEVE <key> <message>
+  #       transfer failed
+  #   UNSUPPORTED-REQUEST
+  #       esrp does not know how to handle request
+  # SERVER commands
+  #   INITREMOTE
+  #       create the remote, may be called more than once
+  #       reply INITREMOTE-SUCCESS or INITREMOTE-FAILURE <message>
+  #   PREPARE
+  #       special remote shall boot up, may now send commands
+  #       expected to ask for configuration, then reply
+  #       with PREPARE-SUCCESS or PREPARE-FAILURE <message>
+  #   TRANSFER STORE|RETRIEVE <key> <file>
+  #       store/retrieve a key, commands may be sent during transfer
+  #       reply with TRANSFER_SUCCESS|FAILURE STORE|RETRIEVE <key> [message]
+  #   CHECKPRESENT <key>
+  #       request to check if key is present
+  #       reply CHECKPRESENT-SUCCESS <key>, CHECKPRESENT-FAILURE <key>,
+  #       or CHECKPRESENT-UNKNOWN <key> <message>
+  #   REMOVE <key>
+  #       request to remove a key's contents
+  #       reply REMOVE-SUCCESS <key> or REMOVE-FAILURE <key> <message>
+  #   -- end of required responses, others may reply with UNSUPPORTED-REQUEST
+  #   VALUE <value>
+  #       response to GETCONFIG etc
+  #
+  #   GETCOST
+  #       requests to return a use cost, see Config/Cost.hs
+  #       reply COST <int>
+  #   GETAVAILABILITY
+  #       implement if remote is only locally reachable
+  #       reply AVAILABILITY GLOBAL|LOCAL
+  #   CLAIMURL <url>
+  #       ask if remote wishes to claim responsibility for downloading url
+  #       reply CLAIMURL-SUCCESS or CLAIMURL-FAILURE
+  #   CHECKURL <url>
+  #       check if url's content can currently be downloaded
+  #       reply CHECKURL-FAILURE, CHECKURL-CONTENTS <size>|UNKNOWN [filename],
+  #       or CHECKURL-MULTI <url> <size>|UNKNOWN <filename> ...
+  #          which is used if multiple files with urls are contained
+  #   WHEREIS <key>
+  #       provide information about ways to access content of key
+  #       reply WHEREIS-SUCCESS <url/location> or WHEREIS-FAILURE
+  #       not needed if SETURIPRESENT is used
+  #   ERROR <message>
+  #       things got too messed up to continue, esrp may exit with its own ERROR
+  #   <OTHER>
+  #       more commands may be implemented and should be handled as unsupported
+  
+
+try:
+  import fcp
+except:
+  print "** PyFreenet core module 'fcp' not installed."
+  sys.exit(1)
+
+
+argv = sys.argv
+argc = len(argv)
+progname = argv[0]
+
+
