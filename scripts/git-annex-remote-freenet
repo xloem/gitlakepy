@@ -455,7 +455,7 @@ class FreenetRemote(GitAnnexESRP):
   # usually uses SETCONFIG, SETCREDS
   def initRemote(self):
     if self.GETCONFIG('priority') == '':
-      self.SETCONFIG('priority', 4)
+      self.SETCONFIG('priority', 0)
 
   # activate remote, called once at start
   # query configuration with GETCONFIG, GETCREDS
