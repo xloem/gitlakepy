@@ -449,18 +449,28 @@ class FreenetRemote(GitAnnexESRP):
   def __init__(self):
     self.node = None
     GitAnnexESRP.__init__(self)
+
+  # create new special remote, may be called repeatedly on the same remote,
+  # or not at all if the remote has already been configured
+  # usually uses SETCONFIG, SETCREDS
   def initRemote(self):
     if self.GETCONFIG('priority') == '':
       self.SETCONFIG('priority', 4)
+
+  # activate remote, called once at start
+  # query configuration with GETCONFIG, GETCREDS
   def prepare(self):
     self.node = fcp.node.FCPNode(name = 'git-annex-' + self.GETUUID(),
                                  logfunc = lambda msg: self.DEBUG(msg),
-                                 verbosity = 4)
+                                 verbosity = 5)
     self.jobsTicket = self.node.refreshPersistentRequests(async=True);
+
+  # return False or True if key is present
   def isPresent(self,key):
     # TODO: actually check for content, and then can store uri prior to completion of store
     return len(self.GETURLS(key, "freenet:")) > 0
 
+  # store file in key
   def store(self,key,file):
     # TODO: check if server cannot access data folder
     ticket = None
@@ -489,9 +499,14 @@ class FreenetRemote(GitAnnexESRP):
   def fcpCallback(status, value):
     self.DEBUG(status + ': ' + repr(value))
 
+  # return True if responsible for downloading passed url
   def claimsUrl(self, url):
     return url[0:8] == 'freenet:'
 
+  # return a list of (url, size, filename) that may currently be
+  # downloaded from the provided url
+  # size may be None if unknown
+  # return empty list if cannot currently download url
   def checkUrl(self, url):
     try:
       self.node.get(url, nodata=True)
@@ -499,9 +514,11 @@ class FreenetRemote(GitAnnexESRP):
     except:
       return []
 
+  # retrieve key to file
   def retrieve(self, key, file):
     node.get(self.GETSTATE(key), file=file, priority=self.GETCONFIG('priority'))
 
+  # connection closed, deactivate remote if activated
   def finish(self):
     if self.node != None:
       self.node.shutdown()
