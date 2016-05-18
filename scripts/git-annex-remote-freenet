@@ -471,8 +471,7 @@ class FreenetRemote(GitAnnexESRP):
     return len(self.GETURLS(key, "freenet:")) > 0
 
   # store file in key
-  def store(self,key,file):
-    # TODO: check if server cannot access data folder
+  def store(self,key,filename):
     ticket = None
     uri = 'CHK@'
     state = self.GETSTATE(key)
@@ -485,7 +484,7 @@ class FreenetRemote(GitAnnexESRP):
       else:
         uri = state
     if ticket == None:
-      ticket = self.node.put(file=file, name=key, uri=uri, persistence='reboot', async=True, waituntilsent=True, priority=self.GETCONFIG('priority'))
+      ticket = self.node.put(data=file(filename,'rb').read(), name=key, uri=uri, persistence='reboot', async=True, waituntilsent=True, priority=self.GETCONFIG('priority'))
       self.SETSTATE(key, ticket.id)
     ticket.callback = self.fcpCallback # if this line is crashing it may be removed
     try:
