@@ -492,7 +492,7 @@ class FreenetRemote(GitAnnexESRP):
         async = True,
         waituntilsent = True,
         priority = self.GETCONFIG('priority'),
-        callback = lambda status, value: self.DEBUG(status + ': '  + repr(value))
+        callback = lambda status, value: self.fcpCallback(status, value)
       )
       self.SETSTATE(key, ticket.id)
     try:
@@ -502,6 +502,11 @@ class FreenetRemote(GitAnnexESRP):
     uri = ticket.wait()
     self.SETSTATE(key, uri)
     self.SETURIPRESENT(key, 'freenet:' + uri)
+
+  def fcpCallback(self, status, value):
+    # TODO implement progress update
+    self.DEBUG(status + ': '  + repr(value))
+    
 
   # return True if responsible for downloading passed url
   def claimsUrl(self, url):
