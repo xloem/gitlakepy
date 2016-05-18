@@ -484,9 +484,17 @@ class FreenetRemote(GitAnnexESRP):
       else:
         uri = state
     if ticket == None:
-      ticket = self.node.put(data=file(filename,'rb').read(), name=key, uri=uri, persistence='reboot', async=True, waituntilsent=True, priority=self.GETCONFIG('priority'))
+      ticket = self.node.put(
+        data = file(filename,'rb').read(),
+        name = key,
+        uri = uri,
+        persistence = 'reboot',
+        async = True,
+        waituntilsent = True,
+        priority = self.GETCONFIG('priority'),
+        callback = lambda status, value: self.DEBUG(status + ': '  + repr(value))
+      )
       self.SETSTATE(key, ticket.id)
-    ticket.callback = self.fcpCallback
     try:
       uri = ticket.uri
     except:
@@ -494,9 +502,6 @@ class FreenetRemote(GitAnnexESRP):
     uri = ticket.wait()
     self.SETSTATE(key, uri)
     self.SETURIPRESENT(key, 'freenet:' + uri)
-
-  def fcpCallback(status, *value):
-    self.DEBUG(status + ': ' + repr(value))
 
   # return True if responsible for downloading passed url
   def claimsUrl(self, url):
