@@ -8,6 +8,7 @@ setup(name='gitlakepy',
       author='Karl Semich',
       author_email='gmkarl@gmail.com',
       url='https://github.com/gmkarl/gitlakepy',
+      py_modules=['gitlake'],
       scripts=['scripts/git-annex-remote-freenet'],
       requires=['fcp'],
      )
