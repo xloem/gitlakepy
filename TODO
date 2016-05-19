@@ -1,0 +1,12 @@
+[ ] Fix bug with reinsertion
+[ ] Test
+  [ ] Test putting a file
+  [ ] Test getting a file
+  [ ] Test resuming a put
+  [ ] Test getting a file when put is incomplete
+  [ ] Test losing a file from freenet and reinserting
+  [ ] Make a testsuite, even if it's only a simple scriptfile with exitstatus
+      - maybe distutils has testing
+[ ] Add support for PSK etc
+  [ ] Provide hooks to allow syncing to update a freesite
+[ ] Provide hooks to allow syncing to update repo, perhaps via infocalypse
