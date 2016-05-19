@@ -60,8 +60,6 @@ class FreenetRemote(GitAnnexESRP):
         for job in self.node.getAllJobs():
           if job.id == state:
             ticket = job
-      else:
-        uri = state
     if ticket == None:
       data = file(filename,'rb').read()
       size = len(data)
@@ -83,7 +81,7 @@ class FreenetRemote(GitAnnexESRP):
     except:
       pass
     uri = ticket.wait()
-    self.SETSTATE(key, uri)
+    self.SETSTATE(key, '')
     self.SETURIPRESENT(key, 'freenet:' + uri)
 
   def fcpCallback(self, key, size, status, value):
@@ -127,14 +125,21 @@ class FreenetRemote(GitAnnexESRP):
 
   # retrieve key to file
   def retrieve(self, key, filename):
-    # TODO: this uses GETSTATE, but isPresent uses GETURLS
-    #       could lead to inconsistent state
     # TODO: send progress messages for all long-running tasks
-    self.node.get(
-      self.GETSTATE(key),
-      stream = file(filename,'wb'),
-      priority = self.GETCONFIG('priority')
-    )
+    exception = None
+    for url in self.GETURLS(key, "freenet:"):
+      try:
+        self.node.get(
+          url,
+          stream = file(filename,'wb'),
+          priority = self.GETCONFIG('priority')
+        )
+        return
+      except Exception as e:
+        exception = e
+    if exception is None:
+      exception = Exception('Not present')
+    raise exception
 
   # connection closed, deactivate remote if activated
   def finish(self):
