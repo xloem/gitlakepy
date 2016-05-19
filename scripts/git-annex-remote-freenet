@@ -467,8 +467,18 @@ class FreenetRemote(GitAnnexESRP):
 
   # return False or True if key is present
   def isPresent(self,key):
-    # TODO: actually check for content, and then can store uri prior to completion of store
-    return len(self.GETURLS(key, "freenet:")) > 0
+    for url in self.GETURLS(key, "freenet:"):
+      try:
+        self.node.get(
+          url,
+          nodata = True,
+          ignoreds = True,
+          priority = self.GETCONFIG('priority')
+        )
+        return True
+      except Exception:
+        pass
+    return False
 
   # store file in key
   def store(self,key,filename):
@@ -484,17 +494,21 @@ class FreenetRemote(GitAnnexESRP):
       else:
         uri = state
     if ticket == None:
+      data = file(filename,'rb').read()
+      size = len(data)
       ticket = self.node.put(
-        data = file(filename,'rb').read(),
+        data = data,
         name = key,
         uri = uri,
         persistence = 'reboot',
         async = True,
         waituntilsent = True,
+        Verbosity = 9,
         priority = self.GETCONFIG('priority'),
-        callback = lambda status, value: self.fcpCallback(status, value)
+        callback = lambda status, value: self.fcpCallback(key, size, status, value)
       )
       self.SETSTATE(key, ticket.id)
+      data = ""
     try:
       uri = ticket.uri
     except:
@@ -503,9 +517,24 @@ class FreenetRemote(GitAnnexESRP):
     self.SETSTATE(key, uri)
     self.SETURIPRESENT(key, 'freenet:' + uri)
 
-  def fcpCallback(self, status, value):
-    # TODO implement progress update
+  def fcpCallback(self, key, size, status, value):
     self.DEBUG(status + ': '  + repr(value))
+    if status == "pending":
+      if value['header'] == "SimpleProgress":
+        self.PROGRESS(int(size / float(value['Required']) * float(value['Succeeded'])))
+      elif value['header'] == 'URIGenerated':
+        uri = value['URI']
+        self.SETURIPRESENT(key, 'freenet:' + uri)
+      elif value['header'] == 'ExpectedHashes':
+        # if the key happens to be SHA256, we can quickly verify the data is not corrupt against the key
+        try:
+          hash = value['Hashes.SHA256']
+          if key[:6] == 'SHA256' and key[-len(hash):] != hash:
+            raise Exception('sha256 mismatch %s is not %s' % { hash, key })
+        except KeyError:
+          pass
+    elif status == "successful":
+      self.PROGRESS(size)
     
 
   # return True if responsible for downloading passed url
@@ -518,14 +547,25 @@ class FreenetRemote(GitAnnexESRP):
   # return empty list if cannot currently download url
   def checkUrl(self, url):
     try:
-      self.node.get(url, nodata=True)
+      self.node.get(
+        url,
+        nodata = True,
+        priority = self.GETCONFIG('priority')
+      )
       return [url,None,'']
     except:
       return []
 
   # retrieve key to file
-  def retrieve(self, key, file):
-    node.get(self.GETSTATE(key), file=file, priority=self.GETCONFIG('priority'))
+  def retrieve(self, key, filename):
+    # TODO: this uses GETSTATE, but isPresent uses GETURLS
+    #       could lead to inconsistent state
+    # TODO: send progress messages for all long-running tasks
+    self.node.get(
+      self.GETSTATE(key),
+      stream = file(filename,'wb'),
+      priority = self.GETCONFIG('priority')
+    )
 
   # connection closed, deactivate remote if activated
   def finish(self):
