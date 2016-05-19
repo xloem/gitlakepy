@@ -1,0 +1,6 @@
+git-annex-remote-freenet
+  A freenet remote for git-annex.
+
+  Usage:
+  $ git annex initremote freenet type=external encryption=<type> externaltype=freenet
+
