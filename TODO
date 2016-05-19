@@ -10,3 +10,9 @@
 [ ] Add support for PSK etc
   [ ] Provide hooks to allow syncing to update a freesite
 [ ] Provide hooks to allow syncing to update repo, perhaps via infocalypse
+
+
+[ ] Provide gnunet git-annex backend
+[ ] Provide qora or some blockchain git-annex backend
+
+[ ] Make this repo into a git-annex repository and provide hashed links to installers for dependencies
