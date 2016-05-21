@@ -1,4 +1,6 @@
-[ ] Fix bug with reinsertion
+[ ] Fix bugs
+  [ ] reinsertion
+  [ ] when rejoining interrupted jobs, progress messages are not sent
 [ ] Test
   [ ] Test putting a file
   [ ] Test getting a file
@@ -7,9 +9,12 @@
   [ ] Test losing a file from freenet and reinserting
   [ ] Make a testsuite, even if it's only a simple scriptfile with exitstatus
       - maybe distutils has testing
+[x] Implement progress output for all operations
+[ ] Generate urls for uninserted files to see if they already exist
 [ ] Add support for PSK etc
   [ ] Provide hooks to allow syncing to update a freesite
 [ ] Provide hooks to allow syncing to update repo, perhaps via infocalypse
+        or treat freenet as a dumb http server, see git-update-server-info
 
 
 [ ] Provide gnunet git-annex backend
