@@ -14,6 +14,86 @@ argv = sys.argv
 argc = len(argv)
 progname = argv[0]
 
+class FreenetTransfer:
+  def __init__(self, esrp, url = 'CHK@', key = None):
+    self.esrp = esrp
+    self.priority = esrp.GETCONFIG('priority')
+    self.persistence = esrp.GETCONFIG('persistence')
+    self.node = esrp.node
+    self.url = url
+    self.key = key
+    self.transferred = 0
+
+  def _get(self, **args):
+
+    # works around a possible bug in pyFreenet where it crashes if
+    # it encounters a past transfer with no data in result
+    if 'nodata' in args and args['nodata']:
+      persistence = 'connection'
+    else:
+      persistence = self.persistence
+
+    self.ticket = self.node.get(
+      self.url,
+      async = True,
+      waituntilsent = True,
+      Verbosity = 9,
+      persistence = persistence,
+      priority = self.priority,
+      callback = lambda status, value: self._progress(status, value),
+      **args
+    )
+    return self.ticket
+
+  def _put(self, data):
+    self.ticket = self.node.put(
+      data = data,
+      name = self.key,
+      uri = self.url,
+      async = True,
+      waituntilsent = True,
+      Verbosity = 9,
+      persistence = self.persistence,
+      priority = self.priority,
+      callback = lambda status, value: self._progress(status, value)
+    )
+    return self.ticket
+
+  def download(self, filename):
+    return self._get(stream = file(filename, 'wb')).wait()[1] is None  
+
+  def checkAny(self):
+    return self._get(nodata = True).wait()[1] == 1
+
+  def checkLocal(self):
+    return self._get(nodata = True, dsnly = True).wait()[1] == 1
+
+  def checkRemote(self):
+    return self._get(nodata = True, ignoreds = True).wait()[1] == 1
+
+  def _progress(self, status, value):
+    self.esrp.DEBUG(status + ': '  + repr(value))
+    if status == "pending":
+      if value['header'] == "SimpleProgress":
+        self.transferred = int(value['Succeeded']) * 32768 * 2 / 3
+        self.esrp.PROGRESS(self.transferred)
+      elif self.key is None:
+        pass
+      elif value['header'] == 'URIGenerated':
+        uri = value['URI']
+      elif value['header'] == 'ExpectedHashes':
+        # if the key happens to be SHA256, we can quickly verify the data is not corrupt against the key
+        try:
+          hash = value['Hashes.SHA256']
+          if self.key[:6] == 'SHA256' and self.key[-len(hash):] != hash:
+            raise Exception('sha256 mismatch %s is not %s' % ( hash, self.key ))
+        except KeyError:
+          pass
+    elif status == "successful":
+      self.esrp.PROGRESS(self.transferred + 32768 * 2 / 3)
+    
+
+
 class FreenetRemote(GitAnnexESRP):
   def __init__(self):
     self.node = None
@@ -25,26 +105,26 @@ class FreenetRemote(GitAnnexESRP):
   def initRemote(self):
     if self.GETCONFIG('priority') == '':
       self.SETCONFIG('priority', 0)
+    if self.GETCONFIG('persistence') == '':
+      self.SETCONFIG('persistence', 'reboot')
 
   # activate remote, called once at start
   # query configuration with GETCONFIG, GETCREDS
   def prepare(self):
     self.node = fcp.node.FCPNode(name = 'git-annex-' + self.GETUUID(),
-                                 logfunc = lambda msg: self.DEBUG(msg),
+                                 logfunc = lambda msg: self.DEBUG(repr(msg)),
                                  verbosity = 5)
     self.jobsTicket = self.node.refreshPersistentRequests(async=True);
+    
+  # return True if responsible for downloading passed url
+  def claimsUrl(self, url):
+    return url[0:8] == 'freenet:'
 
   # return False or True if key is present
   def isPresent(self,key):
     for url in self.GETURLS(key, "freenet:"):
       try:
-        self.node.get(
-          url,
-          nodata = True,
-          ignoreds = True,
-          priority = self.GETCONFIG('priority')
-        )
-        return True
+        return FreenetTransfer(self, url).checkRemote()
       except Exception:
         pass
     return False
@@ -61,52 +141,11 @@ class FreenetRemote(GitAnnexESRP):
           if job.id == state:
             ticket = job
     if ticket == None:
-      data = file(filename,'rb').read()
-      size = len(data)
-      ticket = self.node.put(
-        data = data,
-        name = key,
-        uri = uri,
-        persistence = 'reboot',
-        async = True,
-        waituntilsent = True,
-        Verbosity = 9,
-        priority = self.GETCONFIG('priority'),
-        callback = lambda status, value: self.fcpCallback(key, size, status, value)
-      )
+      ticket = FreenetTransfer(self, uri, key)._put(file(filename, 'rb').read())
       self.SETSTATE(key, ticket.id)
-      data = ""
-    try:
-      uri = ticket.uri
-    except:
-      pass
     uri = ticket.wait()
     self.SETSTATE(key, '')
     self.SETURIPRESENT(key, 'freenet:' + uri)
-
-  def fcpCallback(self, key, size, status, value):
-    self.DEBUG(status + ': '  + repr(value))
-    if status == "pending":
-      if value['header'] == "SimpleProgress":
-        self.PROGRESS(int(size / float(value['Required']) * float(value['Succeeded'])))
-      elif value['header'] == 'URIGenerated':
-        uri = value['URI']
-        self.SETURIPRESENT(key, 'freenet:' + uri)
-      elif value['header'] == 'ExpectedHashes':
-        # if the key happens to be SHA256, we can quickly verify the data is not corrupt against the key
-        try:
-          hash = value['Hashes.SHA256']
-          if key[:6] == 'SHA256' and key[-len(hash):] != hash:
-            raise Exception('sha256 mismatch %s is not %s' % { hash, key })
-        except KeyError:
-          pass
-    elif status == "successful":
-      self.PROGRESS(size)
-    
-
-  # return True if responsible for downloading passed url
-  def claimsUrl(self, url):
-    return url[0:8] == 'freenet:'
 
   # return a list of (url, size, filename) that may currently be
   # downloaded from the provided url
@@ -114,27 +153,19 @@ class FreenetRemote(GitAnnexESRP):
   # return empty list if cannot currently download url
   def checkUrl(self, url):
     try:
-      self.node.get(
-        url,
-        nodata = True,
-        priority = self.GETCONFIG('priority')
-      )
-      return [url,None,'']
+      if FreenetTransfer(self, url).checkAny():
+        return [url, None, '']
     except:
-      return []
+      pass
+    return []
 
   # retrieve key to file
   def retrieve(self, key, filename):
-    # TODO: send progress messages for all long-running tasks
     exception = None
     for url in self.GETURLS(key, "freenet:"):
       try:
-        self.node.get(
-          url,
-          stream = file(filename,'wb'),
-          priority = self.GETCONFIG('priority')
-        )
-        return
+        if FreenetTransfer(self, url, key).download(filename):
+          return
       except Exception as e:
         exception = e
     if exception is None:
