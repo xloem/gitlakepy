@@ -43,11 +43,11 @@ class FreenetTransfer:
     if 'nodata' in args and args['nodata']:
       persistence = 'connection'
       Global = False
-      ignoreds = not self.localonly
+      if not 'ignoreds' in args:
+        args['ignoreds'] = not self.localonly
     else:
       persistence = self.persistence
       Global = self.Global
-      ignoreds = False
 
     self.ticket = self.node.get(
       self.url,
@@ -58,7 +58,6 @@ class FreenetTransfer:
       Global = Global,
       priority = self.priority,
       dsonly = self.localonly,
-      ignoreds = ignoreds,
       callback = lambda status, value: self._progress(status, value),
       **args
     )
@@ -85,10 +84,10 @@ class FreenetTransfer:
   def download(self, filename):
     return self._get(stream = file(filename, 'wb')).wait()[1] is None  
 
-  def check(self):
+  def check(self, **args):
     pool = multiprocessing.pool.ThreadPool(processes=1)
     try:
-        async_result = pool.apply_async(self._get(nodata = True).wait)
+        async_result = pool.apply_async(self._get(nodata = True, **args).wait)
         return async_result.get(self.timeout)[1] == 1
     except multiprocessing.TimeoutError:
       self.esrp.DEBUG("Timed out.")
@@ -175,13 +174,26 @@ class FreenetRemote(GitAnnexESRP):
     self.SETSTATE(key, '')
     self.SETURIPRESENT(key, 'freenet:' + uri)
 
+  # remove a key's contents
+  def remove(self, key):
+    state = self.GETSTATE(key)
+    if state != '':
+      if state[0:2] == 'id':
+        self.jobsTicket.wait()
+        for job in self.node.getAllJobs():
+          if job.id == state:
+            job.cancel()
+    self.SETSTATE(key, '')
+    for url in self.GETURLS(key, "freenet:"):
+      self.SETURIMISSING(key, url)
+
   # return a list of (url, size, filename) that may currently be
   # downloaded from the provided url
   # size may be None if unknown
   # return empty list if cannot currently download url
   def checkUrl(self, url):
     try:
-      if FreenetTransfer(self, url).checkAny():
+      if FreenetTransfer(self, url).check(ignoreds = False):
         return [url, None, '']
     except:
       pass

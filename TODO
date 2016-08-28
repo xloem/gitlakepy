@@ -1,8 +1,8 @@
 [x] Document options
 [ ] Test
   [ ] get git annex testremote to pass, should remove() pass?
-      [ ] look into WORM behavior, how does it handle remove()
-      [ ] make an option to 'fake' removal and succeed
+      [x] implement 'fake' removal
+      [ ] make remove only work if an option enabling it is passed
 [ ] Fix bugs
   [x] reinsertion
 	`git annex copy --to=freenet` performs reinsertion
