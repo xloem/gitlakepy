@@ -14,3 +14,18 @@ git-annex-remote-freenet
   Usage:
   $ git annex initremote freenet type=external encryption=<type> externaltype=freenet
 
+  Additional Options:
+    priority=0
+      Set the priority of the freenet interactions.  Higher numbers are less aggressive.
+
+    persistence=reboot
+      May be 'connection', 'reboot', or 'forever'.  How long to keep a transfer going in the background if interrupted.
+
+    timeout=60
+      Number of seconds to wait when checking for content before assuming it has been lost.
+
+    chkonly=
+      If set, upload nothing to freenet, only generate urls.
+
+    localonly=
+      If set, ignore the larger freenet network and only work with the local datastore.
