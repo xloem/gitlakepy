@@ -85,8 +85,10 @@ class FreenetTransfer:
         # if the key happens to be SHA256, we can quickly verify the data is not corrupt against the key
         try:
           hash = value['Hashes.SHA256']
-          if self.key[:6] == 'SHA256' and self.key[-len(hash):] != hash:
-            raise Exception('sha256 mismatch %s is not %s' % ( hash, self.key ))
+          if self.key[:6] == 'SHA256':
+            hidx = self.key.index('--') + 2
+            if self.key[hidx:hidx+len(hash)] != hash:
+              raise Exception('sha256 mismatch %s is not %s' % ( hash, self.key ))
         except KeyError:
           pass
     elif status == "successful":
