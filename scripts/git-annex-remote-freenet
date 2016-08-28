@@ -19,10 +19,8 @@ class FreenetTransfer:
     self.esrp = esrp
     self.priority = esrp.GETCONFIG('priority')
     self.persistence = esrp.GETCONFIG('persistence')
-    if self.persistence in ('reboot', 'forever'):
-      self.Global = True
-    else:
-      self.Global = False
+    #self.Global = self.persistence in ('reboot', 'forever')
+    self.Global = False
     self.node = esrp.node
     self.url = url
     self.key = key
