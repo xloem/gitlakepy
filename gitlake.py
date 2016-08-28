@@ -309,7 +309,7 @@ class GitAnnexESRP(threading.Thread):
       self.remove(key)
     except Exception as e:
       self.exception(False)
-      return self.send('REMOVE-FAILURE', key, message)
+      return self.send('REMOVE-FAILURE', key, e.message)
     return self.send('REMOVE-SUCCESS', key)
 
   #  -- end of required responses
@@ -385,19 +385,19 @@ class GitAnnexESRP(threading.Thread):
 
   # store file in key
   def store(self, key, file):
-    raise NotImplementedError()
+    raise NotImplementedError("store not implemented")
 
   # retrieve key to file
   def retrieve(self, key, file):
-    raise NotImplementedError()
+    raise NotImplementedError("retrieve not implemented")
 
   # return False or True if key is present
   def isPresent(self, key):
-    raise NotImplementedError()
+    raise NotImplementedError("isPresent not implemented")
 
   # remove a key's contents
   def remove(self, key):
-    raise NotImplementedError()
+    raise NotImplementedError("remove not implemented")
 
   ### Optional:
   # get use cost
