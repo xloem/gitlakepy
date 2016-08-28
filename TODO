@@ -1,7 +1,10 @@
 [ ] Fix bugs
   [ ] reinsertion
+	I think reinsertion should work? but it is very slow
+	`git annex copy --to=freenet` checks presence before reinserting
   [ ] when rejoining interrupted jobs, progress messages are not sent
 [ ] Test
+  [ ] NEW: check git annex testremote, does this do what is needed?
   [ ] Test putting a file
   [ ] Test getting a file
   [ ] Test resuming a put

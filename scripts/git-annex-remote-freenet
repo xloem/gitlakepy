@@ -1,6 +1,7 @@
 #!/usr/bin/env python2
 
 import sys
+import multiprocessing, multiprocessing.pool
 from gitlake import GitAnnexESRP
 
 try:
@@ -19,7 +20,16 @@ class FreenetTransfer:
     self.esrp = esrp
     self.priority = esrp.GETCONFIG('priority')
     self.persistence = esrp.GETCONFIG('persistence')
-    #self.Global = self.persistence in ('reboot', 'forever')
+    self.timeout = int(esrp.GETCONFIG('timeout'))
+    if esrp.GETCONFIG('chkonly') == '':
+      self.chkonly = False
+    else:
+      self.chkonly = True
+    if esrp.GETCONFIG('localonly') == '':
+      self.localonly = False
+    else:
+      self.localonly = True
+    self.Global = self.persistence in ('reboot', 'forever')
     self.Global = False
     self.node = esrp.node
     self.url = url
@@ -33,9 +43,11 @@ class FreenetTransfer:
     if 'nodata' in args and args['nodata']:
       persistence = 'connection'
       Global = False
+      ignoreds = not self.localonly
     else:
       persistence = self.persistence
       Global = self.Global
+      ignoreds = False
 
     self.ticket = self.node.get(
       self.url,
@@ -45,6 +57,8 @@ class FreenetTransfer:
       persistence = persistence,
       Global = Global,
       priority = self.priority,
+      dsonly = self.localonly,
+      ignoreds = ignoreds,
       callback = lambda status, value: self._progress(status, value),
       **args
     )
@@ -61,6 +75,9 @@ class FreenetTransfer:
       persistence = self.persistence,
       Global = self.Global,
       priority = self.priority,
+      chkonly = self.chkonly,
+      LocalRequestOnly = self.localonly,
+      realtime = True,
       callback = lambda status, value: self._progress(status, value)
     )
     return self.ticket
@@ -68,14 +85,14 @@ class FreenetTransfer:
   def download(self, filename):
     return self._get(stream = file(filename, 'wb')).wait()[1] is None  
 
-  def checkAny(self):
-    return self._get(nodata = True).wait()[1] == 1
-
-  def checkLocal(self):
-    return self._get(nodata = True, dsnly = True).wait()[1] == 1
-
-  def checkRemote(self):
-    return self._get(nodata = True, ignoreds = True).wait()[1] == 1
+  def check(self):
+    pool = multiprocessing.pool.ThreadPool(processes=1)
+    try:
+        async_result = pool.apply_async(self._get(nodata = True).wait)
+        return async_result.get(self.timeout)[1] == 1
+    except multiprocessing.TimeoutError:
+      self.esrp.DEBUG("Timed out.")
+      return False
 
   def _progress(self, status, value):
     self.esrp.DEBUG(status + ': '  + repr(value))
@@ -115,6 +132,8 @@ class FreenetRemote(GitAnnexESRP):
       self.SETCONFIG('priority', 0)
     if self.GETCONFIG('persistence') == '':
       self.SETCONFIG('persistence', 'reboot')
+    if self.GETCONFIG('timeout') == '':
+      self.SETCONFIG('timeout', 60)
 
   # activate remote, called once at start
   # query configuration with GETCONFIG, GETCREDS
@@ -132,8 +151,9 @@ class FreenetRemote(GitAnnexESRP):
   def isPresent(self,key):
     for url in self.GETURLS(key, "freenet:"):
       try:
-        return FreenetTransfer(self, url).checkRemote()
-      except Exception:
+        return FreenetTransfer(self, url).check()
+      except Exception as e:
+        self.DEBUG(e.message)
         pass
     return False
 
