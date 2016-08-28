@@ -19,6 +19,10 @@ class FreenetTransfer:
     self.esrp = esrp
     self.priority = esrp.GETCONFIG('priority')
     self.persistence = esrp.GETCONFIG('persistence')
+    if self.persistence in ('reboot', 'forever'):
+      self.Global = True
+    else:
+      self.Global = False
     self.node = esrp.node
     self.url = url
     self.key = key
@@ -30,8 +34,10 @@ class FreenetTransfer:
     # it encounters a past transfer with no data in result
     if 'nodata' in args and args['nodata']:
       persistence = 'connection'
+      Global = False
     else:
       persistence = self.persistence
+      Global = self.Global
 
     self.ticket = self.node.get(
       self.url,
@@ -39,6 +45,7 @@ class FreenetTransfer:
       waituntilsent = True,
       Verbosity = 9,
       persistence = persistence,
+      Global = Global,
       priority = self.priority,
       callback = lambda status, value: self._progress(status, value),
       **args
@@ -54,6 +61,7 @@ class FreenetTransfer:
       waituntilsent = True,
       Verbosity = 9,
       persistence = self.persistence,
+      Global = self.Global,
       priority = self.priority,
       callback = lambda status, value: self._progress(status, value)
     )
