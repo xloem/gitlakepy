@@ -54,9 +54,9 @@ class SkynetRemote(GitAnnexESRP):
 	def skylink_to_urls(skylink):
 		skylink = Skynet.strip_prefix(skylink)
                 
-                portals = Skynet.default_download_options().portal_url
-                if not isinstance(portals, collections.Sequence):
-                    portals = [portals]
+		portals = Skynet.default_download_options().portal_url
+		if not isinstance(portals, collections.Sequence):
+			portals = [portals]
 
 		return [portal + '/' + skylink for portal in portals]
 
