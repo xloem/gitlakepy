@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+import collections
+
 from gitlake import GitAnnexESRP
 
 try:
@@ -51,7 +53,12 @@ class SkynetRemote(GitAnnexESRP):
 	@staticmethod
 	def skylink_to_urls(skylink):
 		skylink = Skynet.strip_prefix(skylink)
-		return [portal + '/' + skylink for portal in Skynet.default_download_options().portal_url]
+                
+                portals = Skynet.default_download_options().portal_url
+                if not isinstance(portals, collections.Sequence):
+                    portals = [portals]
+
+		return [portal + '/' + skylink for portal in portals]
 
 	def checkUrl(self, url):
 		try:
