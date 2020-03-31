@@ -1,5 +1,8 @@
 import inspect
-import Queue
+try:
+    import Queue
+except:
+    import queue as Queue
 import sys
 import threading
 import traceback
