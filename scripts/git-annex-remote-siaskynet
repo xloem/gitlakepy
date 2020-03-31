@@ -70,7 +70,7 @@ class SkynetRemote(GitAnnexESRP):
 		skylink = Skynet.strip_prefix(skylink)
                 
 		portals = Skynet.default_download_options().portal_url
-		if not isinstance(portals, collections.Sequence):
+		if isinstance(portals, str):
 			portals = [portals]
 
 		return [portal + '/' + skylink for portal in portals]
