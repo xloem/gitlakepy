@@ -5,8 +5,19 @@ INSTALLATION
 sudo ./setup.py install
 
 
-
 SCRIPTS
+
+git-annex-remote-siaskynet
+  A freenet remote for Sia Skynet's http webportals.
+  It was taking me too long to download the blockchain when I wrote this
+  to write something that directly interfaced with it.  May change.
+
+  Usage:
+  $ git annex initremote skynet type=external encryption=<type> externaltype=siaskynet
+
+  Additional Options:
+    None configured.
+
 
 git-annex-remote-freenet
   A freenet remote for git-annex.

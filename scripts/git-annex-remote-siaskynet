@@ -1,0 +1,75 @@
+#!/usr/bin/env python2
+
+from gitlake import GitAnnexESRP
+
+try:
+	from siaskynet import Skynet
+except:
+	GitAnnexESRP().ERROR("** Sia Skynet python2 module 'siaskynet' not installed.")
+	sys.exit(1)
+
+argv = sys.argv
+argc = len(argv)
+progname = argv[0]
+
+class SkynetRemote(GitAnnexESRP):
+	def __init__(self):
+		GitAnnexESRP.__init__(self)
+
+        # return True if responsible for downloading passed url
+	def claimsUrl(self, url):
+		return url[0:6] == 'sia://'
+
+        # return False or True if key is present
+	def isPresent(self, key):
+                keymetadata = key.split('--')[0]
+                keysize = None
+                if keymetadata.find('-s') != -1:
+                    keysize = int(keymetadata.split('-s')[1].split('-')[0])
+		for url in self.GETURLS(key, 'sia://'):
+			try:
+                            metadata = Skynet.metadata(url)
+                            filename = metadata["filename"]
+                            length = int(metadata["subfiles"][filename]["len"])
+                            if filename != key:
+                                pass
+                            if keysize is not None and length != keysize:
+                                pass
+                            return True
+                        except Exception as exception:
+                            self.DEBUG(exception.message)
+                            pass
+                return False
+
+        # store file in key
+        def store(self, key, filename):
+            skylink = Skynet.upload_file(filename)
+            self.SETURIPRESENT(key, skylink)
+            for url in SkynetRemote.skylink_to_urls(skylink):
+                self.SETURIPRESENT(key, url)
+
+        @staticmethod
+        def skylink_to_urls(skylink):
+            skylink = Skynet.strip_prefix(skylink)
+            return [portal + '/' + skylink for portal in Skynet.default_download_options().portal_url]
+
+        def checkUrl(self, url):
+            try:
+                metadata = Skynet.metadata(url)
+                filename = metadata["filename"]
+                length = int(metadata["subfiles"][filename]["len"])
+                return [url, length, filename]
+            except:
+                return []
+
+        # retrieve key to file
+        def retrieve(self, key, filename):
+	    for url in self.GETURLS(key, 'sia://'):
+		try:
+                    Skynet.download_file(filename, url)
+                except Exception as exception:
+                    self.DEBUG(exception.message)
+                    pass
+            return False
+
+SkynetRemote()
