@@ -46,7 +46,21 @@ class SkynetRemote(GitAnnexESRP):
 
 	# store file in key
 	def store(self, key, filename):
-		skylink = Skynet.upload_file(filename)
+		opts = Skynet.default_upload_options()
+		opts.custom_filename = filename
+		with open(filename, 'rb') as file_object:
+			def chunks():
+				chunk_size = 128 * 1024
+				progress = 0
+				while True:
+					self.PROGRESS(progress)
+					data = file_object.read(chunk_size)
+					if not data:
+						break
+					progress = progress + len(data)
+					yield data
+			response = Skynet.upload_file_request_with_chunks(chunks(), opts)
+		skylink = Skynet.uri_skynet_prefix() + response.json()['skylink']
 		self.SETURIPRESENT(key, skylink)
 		for url in SkynetRemote.skylink_to_urls(skylink):
 			self.SETURIPRESENT(key, url)
