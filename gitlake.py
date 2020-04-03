@@ -234,7 +234,7 @@ class GitAnnexESRP(threading.Thread):
     mesg = "%s:%d %s %s" % (line[0],
                             line[1],
                             sys.exc_info()[0].__name__,
-                            sys.exc_info()[1].message)
+                            repr(sys.exc_info()[1]))
     self.incomingError = mesg
     if error:
       self.ERROR(mesg)

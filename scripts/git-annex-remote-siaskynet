@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import collections
+import os
 import sys
 
 from gitlake import GitAnnexESRP
@@ -25,29 +26,46 @@ class SkynetRemote(GitAnnexESRP):
 
 	# return False or True if key is present
 	def isPresent(self, key):
+		self.DEBUG('isPresent ' + key)
 		keymetadata = key.split('--')[0]
 		keysize = None
 		if keymetadata.find('-s') != -1:
 			keysize = int(keymetadata.split('-s')[1].split('-')[0])
 		for url in self.GETURLS(key, 'sia://'):
+			self.DEBUG("checking " + url)
 			try:
 				metadata = Skynet.metadata(url)
-				filename = metadata["filename"]
-				length = int(metadata["subfiles"][filename]["len"])
-				if filename != key:
-					pass
-				if keysize is not None and length != keysize:
-					pass
+				self.DEBUG("metadata: " + str(metadata))
+				if "Skynet-File-Metadata" in metadata and "filename" in metadata["Skynet-File-Metadata"]:
+					filename = metadata["Skynet-File-Metadata"]["filename"]
+				elif "filename" in metadata:
+					filename = metadata["filename"]
+				else:
+					filename = None
+				if filename is not None and os.path.basename(filename) != key:
+					self.DEBUG('filename "' + filename + '" of "' + url + '" mismatches key')
+					continue
+				if "Content-Length" in metadata:
+					length = metadata["Content-Length"]
+				elif "subfiles" in metadata and filename in metadata["subfiles"] and "len" in metadata["subfiles"][filename]:
+					length = metadata["subfiles"][filename]["len"]
+				if "Skynet-File-Metadata" in metadata and "subfiles" in metadata and filename in metadata["subfiles"] and "len" in metadata["subfiles"][filename]:
+					length = metadata["Skynet-File-Metadata"]["subfiles"][filename]["len"]
+				else:
+					length = None
+				if keysize is not None and length is not None and int(length) != keysize:
+					self.DEBUG('length "' + length + '" of "' + url + '" mismatches key')
+					continue
 				return True
 			except Exception as exception:
-				self.DEBUG(exception.message)
+				self.DEBUG(repr(exception))
 				pass
 		return False
 
 	# store file in key
 	def store(self, key, filename):
 		opts = Skynet.default_upload_options()
-		opts.custom_filename = filename
+		opts.custom_filename = os.path.basename(filename)
 		with open(filename, 'rb') as file_object:
 			def chunks():
 				chunk_size = 128 * 1024
@@ -69,11 +87,9 @@ class SkynetRemote(GitAnnexESRP):
 	def skylink_to_urls(skylink):
 		skylink = Skynet.strip_prefix(skylink)
                 
-		portals = Skynet.default_download_options().portal_url
-		if isinstance(portals, str):
-			portals = [portals]
-
-		return [portal + '/' + skylink for portal in portals]
+		download_options = Skynet.default_download_options()
+		urls = [download_options.portal_url + '/' + skylink]
+		return urls
 
 	def checkUrl(self, url):
 		try:
