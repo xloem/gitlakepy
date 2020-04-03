@@ -2,6 +2,7 @@
 
 import collections
 import os
+import random
 import sys
 
 from gitlake import GitAnnexESRP
@@ -16,87 +17,155 @@ argv = sys.argv
 argc = len(argv)
 progname = argv[0]
 
+
 class SkynetRemote(GitAnnexESRP):
 	def __init__(self):
+		self.webportals = {
+			'download': [
+				"https://siasky.net",
+			    "https://skydrain.net",
+			    "https://sialoop.net",
+				"https://skynethub.io",
+			    "https://skynet.luxor.tech",
+			    "https://skynet.tutemwesi.com",
+			    "https://siacdn.com",
+			    "https://vault.lightspeedhosting.com"
+			],
+			'upload': [
+				"https://siasky.net",
+				"https://skynethub.io",
+			    #"https://skynet.tutemwesi.com",
+			]
+		}
+		self.options_getters = {
+			'download': Skynet.default_download_options,
+			'upload': Skynet.default_upload_options
+		}
 		GitAnnexESRP.__init__(self)
+
+	def attempt(self, attempt_type):
+		attempt = {
+			'weburls': [*self.webportals[attempt_type]],
+			'getter': self.options_getters[attempt_type]
+		}
+		random.shuffle(attempt['weburls'])
+		return attempt
+
+	def attempt_options(self, attempt):
+		weburl = attempt['weburls'].pop()
+		self.DEBUG('Trying webportal ' + weburl)
+		attempt['weburl'] = weburl
+		options = attempt['getter']()
+		options.portal_url = weburl
+		return options
 
 	# return True if responsible for downloading passed url
 	def claimsUrl(self, url):
 		return url[0:6] == 'sia://'
 
-	# return False or True if key is present
-	def isPresent(self, key):
-		self.DEBUG('isPresent ' + key)
+	def keysize(self, key):
 		keymetadata = key.split('--')[0]
 		keysize = None
-		if keymetadata.find('-s') != -1:
+		if keymetadata.find('-S') != -1:
+			keysize = int(keymetadata.split('-S')[1].split('-')[0])
+		elif keymetadata.find('-s') != -1:
 			keysize = int(keymetadata.split('-s')[1].split('-')[0])
+		self.DEBUG('extracted keysize of ' + str(keysize))
+		return keysize
+
+
+	# return False or True if key is present
+	def isPresent(self, key):
+		keysize = self.keysize(key)
 		for url in self.GETURLS(key, 'sia://'):
-			self.DEBUG("checking " + url)
 			try:
-				metadata = Skynet.metadata(url)
-				self.DEBUG("metadata: " + str(metadata))
-				if "Skynet-File-Metadata" in metadata and "filename" in metadata["Skynet-File-Metadata"]:
-					filename = metadata["Skynet-File-Metadata"]["filename"]
-				elif "filename" in metadata:
-					filename = metadata["filename"]
-				else:
-					filename = None
-				if filename is not None and os.path.basename(filename) != key:
-					self.DEBUG('filename "' + filename + '" of "' + url + '" mismatches key')
+				metadata = self.metadata(url)
+				if metadata.filename is not None and os.path.basename(metadata.filename) != key:
+					self.DEBUG('filename "' + metadata.filename + '" of "' + url + '" mismatches key')
 					continue
-				if "Content-Length" in metadata:
-					length = metadata["Content-Length"]
-				elif "subfiles" in metadata and filename in metadata["subfiles"] and "len" in metadata["subfiles"][filename]:
-					length = metadata["subfiles"][filename]["len"]
-				if "Skynet-File-Metadata" in metadata and "subfiles" in metadata and filename in metadata["subfiles"] and "len" in metadata["subfiles"][filename]:
-					length = metadata["Skynet-File-Metadata"]["subfiles"][filename]["len"]
-				else:
-					length = None
-				if keysize is not None and length is not None and int(length) != keysize:
+				if keysize is not None and metadata.length is not None and int(metadata.length) != keysize:
 					self.DEBUG('length "' + length + '" of "' + url + '" mismatches key')
 					continue
 				return True
 			except Exception as exception:
 				self.DEBUG(repr(exception))
-				pass
+				continue
 		return False
 
 	# store file in key
 	def store(self, key, filename):
-		opts = Skynet.default_upload_options()
-		opts.custom_filename = os.path.basename(filename)
-		with open(filename, 'rb') as file_object:
-			def chunks():
-				chunk_size = 128 * 1024
-				progress = 0
-				while True:
-					self.PROGRESS(progress)
-					data = file_object.read(chunk_size)
-					if not data:
+		attempt = self.attempt('upload')
+		while True:
+			options = self.attempt_options(attempt)
+			options.custom_filename = os.path.basename(filename)
+			try:
+				if self.keysize(options.custom_filename) >= 256 * 1024:
+					with open(filename, 'rb') as file_object:
+						def chunks():
+							chunk_size = 128 * 1024
+							progress = 0
+							while True:
+								self.PROGRESS(progress)
+								data = file_object.read(chunk_size)
+								if not data:
+									self.DEBUG('Finished sending, waiting for server.')
+									break
+								progress = progress + len(data)
+								yield data
+						response = Skynet.upload_file_request_with_chunks(chunks(), options)
+						self.DEBUG('Server accepted last chunk.')
 						break
-					progress = progress + len(data)
-					yield data
-			response = Skynet.upload_file_request_with_chunks(chunks(), opts)
+				else:
+					response = Skynet.upload_file_request(filename, options)
+					break
+			except Exception as exception:
+				self.DEBUG(attempt['weburl'] + ': ' + repr(exception))
+				continue
 		skylink = Skynet.uri_skynet_prefix() + response.json()['skylink']
 		self.SETURIPRESENT(key, skylink)
-		for url in SkynetRemote.skylink_to_urls(skylink):
+		for url in self.skylink_to_urls(skylink):
 			self.SETURIPRESENT(key, url)
 
-	@staticmethod
-	def skylink_to_urls(skylink):
+	def skylink_to_urls(self, skylink):
 		skylink = Skynet.strip_prefix(skylink)
                 
 		download_options = Skynet.default_download_options()
-		urls = [download_options.portal_url + '/' + skylink]
+		urls = [portal_url + '/' + skylink for portal_url in self.webportals['download']]
 		return urls
+
+	def metadata(self, url):
+		attempt = self.attempt('download')
+		while True:
+			options = self.attempt_options(attempt)
+			try:
+				metadata = Skynet.metadata(url, options)
+				break
+			except Exception as exception:
+				self.DEBUG(self.attempt_weburl + ': ' + repr(exception))
+		self.DEBUG("metadata: " + str(metadata))
+		if "Skynet-File-Metadata" in metadata and "filename" in metadata["Skynet-File-Metadata"]:
+			filename = metadata["Skynet-File-Metadata"]["filename"]
+		elif "filename" in metadata:
+			filename = metadata["filename"]
+		else:
+			filename = None
+		if "Content-Length" in metadata:
+			length = metadata["Content-Length"]
+		elif "subfiles" in metadata and filename in metadata["subfiles"] and "len" in metadata["subfiles"][filename]:
+			length = metadata["subfiles"][filename]["len"]
+		elif "Skynet-File-Metadata" in metadata and "subfiles" in metadata and filename in metadata["subfiles"] and "len" in metadata["subfiles"][filename]:
+			length = metadata["Skynet-File-Metadata"]["subfiles"][filename]["len"]
+		else:
+			length = None
+		return type('obj', (object,), {
+			'filename': filename,
+			'length': length
+		})
 
 	def checkUrl(self, url):
 		try:
-			metadata = Skynet.metadata(url)
-			filename = metadata["filename"]
-			length = int(metadata["subfiles"][filename]["len"])
-			return [url, length, filename]
+			metadata = self.metadata(url)
+			return [url, metadata.length, metadata.filename]
 		except:
 			return []
 
@@ -104,10 +173,18 @@ class SkynetRemote(GitAnnexESRP):
 	def retrieve(self, key, filename):
 		for url in self.GETURLS(key, 'sia://'):
 			try:
-				Skynet.download_file(filename, url)
+				attempt = self.attempt('download')
+				while True:
+					options = self.attempt_options(attempt)
+					try:
+						Skynet.download_file(filename, url, options)
+						break
+					except Exception :
+						self.DEBUG(self.attempt_weburl + ': ' + repr(exception))
+						continue
 			except Exception as exception:
-				self.DEBUG(exception.message)
-				pass
+				self.DEBUG(repr(exception))
+				continue
 		return False
 
 SkynetRemote()
