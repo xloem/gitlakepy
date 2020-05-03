@@ -193,6 +193,7 @@ class SkynetRemote(GitAnnexESRP):
 
 	# retrieve key to file
 	def retrieve(self, key, filename):
+		keysize = self.keysize(key)
 		for url in self.GETURLS(key, 'sia://'):
 			try:
 				attempt = self.attempt('download')
@@ -200,7 +201,7 @@ class SkynetRemote(GitAnnexESRP):
 					try:
 						options = self.attempt_options(attempt, False)
 						result = Skynet.download_file_request(url, options)
-						if result.status_code == 200:
+						if result.status_code == 200 and len(result.content) == keysize:
 							open(filename, 'wb').write(result.content)
 							result.close()
 							break
