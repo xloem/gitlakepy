@@ -78,10 +78,10 @@ class SkynetRemote(GitAnnexESRP):
 	def keysize(self, key):
 		keymetadata = key.split('--')[0]
 		keysize = None
-		if keymetadata.find('-S') != -1:
-			keysize = int(keymetadata.split('-S')[1].split('-')[0])
-		elif keymetadata.find('-s') != -1:
+		if keymetadata.find('-s') != -1:
 			keysize = int(keymetadata.split('-s')[1].split('-')[0])
+		elif keymetadata.find('-S') != -1:
+			keysize = int(keymetadata.split('-S')[1].split('-')[0])
 		self.DEBUG('extracted keysize of ' + str(keysize))
 		return keysize
 
@@ -92,7 +92,7 @@ class SkynetRemote(GitAnnexESRP):
 				self.DEBUG('filename "' + metadata.filename + '" of "' + skylink + '" mismatches key')
 				return False
 			if keysize is not None and metadata.length is not None and int(metadata.length) != keysize:
-				self.DEBUG('length "' + metadata.length + '" of "' + url + '" mismatches key')
+				self.DEBUG('length "' + metadata.length + '" of "' + skylink + '" mismatches key')
 				return False
 			return True
 		except Exception as exception:
