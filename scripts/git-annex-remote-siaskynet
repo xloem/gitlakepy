@@ -211,19 +211,28 @@ class SkynetRemote(GitAnnexESRP):
 				while True:
 					try:
 						options = self.attempt_options(attempt, False)
-						result = Skynet.download_file_request(url, options)
+						result = Skynet.download_file_request(url, options, stream=True)
 						if result.status_code == 200:
-							while keysize is not None and len(result.content) < keysize:
-								self.DEBUG('Short download %d < %d, retrying ...' % (len(result.content), keysize))
+							total_length = result.headers.get('Content-Length')
+							if keysize is not None and total_length is not None and keysize != int(total_length):
+								self.ERROR('Remote size is small')
 								result.close()
-								result = Skynet.download_file_request(url, options)
-							open(filename, 'wb').write(result.content)
-							result.close()
+								continue
+							downloaded = 0
+							with open(filename, "wb") as output:
+								for data in result.iter_content(chunk_size = 128 * 1024):
+									downloaded += len(data)
+									output.write(data)
+									self.PROGRESS(downloaded)
+							if keysize is not None and downloaded < keysize:
+								self.DEBUG('Short download %d < %d ...' % (len(result.content), keysize))
+								result.close()
+								continue
 							break
 						else:
 							result.close()
 							continue
-					except Exception :
+					except Exception as exception:
 						self.DEBUG(attempt['weburl'] + ': ' + repr(exception))
 						continue
 			except Exception as exception:
