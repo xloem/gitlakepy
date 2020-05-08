@@ -92,7 +92,7 @@ class SkynetRemote(GitAnnexESRP):
 				self.DEBUG('filename "' + metadata.filename + '" of "' + skylink + '" mismatches key')
 				return False
 			if keysize is not None and metadata.length is not None and int(metadata.length) != keysize:
-				self.DEBUG('length "' + length + '" of "' + url + '" mismatches key')
+				self.DEBUG('length "' + metadata.length + '" of "' + url + '" mismatches key')
 				return False
 			return True
 		except Exception as exception:
@@ -202,8 +202,8 @@ class SkynetRemote(GitAnnexESRP):
 						options = self.attempt_options(attempt, False)
 						result = Skynet.download_file_request(url, options)
 						if result.status_code == 200:
-							while len(result.content) < keysize:
-								self.DEBUG('Short download, retrying ...')
+							while keysize is not None and len(result.content) < keysize:
+								self.DEBUG('Short download %d < %d, retrying ...' % (len(result.content), keysize))
 								result.close()
 								result = Skynet.download_file_request(url, options)
 							open(filename, 'wb').write(result.content)
