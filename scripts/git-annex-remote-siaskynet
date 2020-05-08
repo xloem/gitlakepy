@@ -10,6 +10,7 @@ from gitlake import GitAnnexESRP
 
 try:
 	from siaskynet import Skynet
+	import json
 except:
 	GitAnnexESRP().ERROR("** Sia Skynet python2 module 'siaskynet' not installed.")
 	sys.exit(1)
@@ -160,7 +161,17 @@ class SkynetRemote(GitAnnexESRP):
 		while True:
 			options = self.attempt_options(attempt)
 			try:
-				metadata = Skynet.metadata(url, options)
+				result = Skynet.metadata_request(url, options)
+				if result.status_code != 200:
+					continue
+				metadata = {
+					"Content-Length": result.headers["Content-Length"],
+					"Content-Type": result.headers["Content-Type"]
+				}
+				if "Content-Disposition" in result.headers:
+					metadata["Content-Disposition"] = result.headers["Content-Disposition"]
+				if "Skynet-File-Metadata" in result.headers:
+					metadata["Skynet-File-Metadata"] = json.loads(result.headers["Skynet-File-Metadata"])
 				break
 			except Exception as exception:
 				self.DEBUG(attempt['weburl'] + ': ' + repr(exception))
