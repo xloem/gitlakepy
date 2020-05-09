@@ -218,6 +218,33 @@ class GitAnnexESRP(threading.Thread):
     reply.setRepeatUntilEmpty()
     return self.getReply(reply, 'GETURLS', key, prefix)
 
+  # not actually a git-annex command
+  # returns the size of the content of the key
+  def GETSIZE(self, key):
+    keymetadata = key.split('--')[0]
+    if keymetadata.find('-s') != -1:
+      filesize = int(keymetadata.split('-s')[1].split('-')[0])
+    else:
+      filesize = None
+    if keymetadata.find('-S') != -1:
+      chunksize = int(keymetadata.split('-S')[1].split('-')[0])
+    else:
+      chunksize = None
+    if filesize is None:
+      filesize = chunksize
+    elif chunksize is not None:
+      if chunksize > filesize:
+        temp = chunksize
+        chunksize = filesize
+        filesize = temp
+      chunk = int(keymetadata.split('-C')[1].split('-')[0])
+      if chunk * chunksize > filesize:
+        filesize = filesize % chunksize
+      else:
+        filesize = chunksize
+    self.DEBUG('calculated keysize of ' + str(filesize) + ' from ' + key)
+    return filesize
+
   # output <message> if --debug is enabled
   def DEBUG(self, message):
     self.send('DEBUG', message)

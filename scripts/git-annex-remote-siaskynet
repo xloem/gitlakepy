@@ -12,7 +12,7 @@ try:
 	from siaskynet import Skynet
 	import json
 except:
-	GitAnnexESRP().ERROR("** Sia Skynet python2 module 'siaskynet' not installed.")
+	GitAnnexESRP().ERROR("** Sia Skynet python3 module 'siaskynet' not installed.")
 	sys.exit(1)
 
 argv = sys.argv
@@ -76,16 +76,6 @@ class SkynetRemote(GitAnnexESRP):
 	def claimsUrl(self, url):
 		return url[0:6] == 'sia://'
 
-	def keysize(self, key):
-		keymetadata = key.split('--')[0]
-		keysize = None
-		if keymetadata.find('-s') != -1:
-			keysize = int(keymetadata.split('-s')[1].split('-')[0])
-		elif keymetadata.find('-S') != -1:
-			keysize = int(keymetadata.split('-S')[1].split('-')[0])
-		self.DEBUG('extracted keysize of ' + str(keysize))
-		return keysize
-
 	def metadataGood(self, key, skylink, keysize):
 		try:
 			metadata = self.metadata(skylink)
@@ -103,7 +93,7 @@ class SkynetRemote(GitAnnexESRP):
 
 	# return False or True if key is present
 	def isPresent(self, key):
-		keysize = self.keysize(key)
+		keysize = self.GETSIZE(key)
 		for url in self.GETURLS(key, 'sia://'):
 			if not self.metadataGood(key, url, keysize):
 				continue
@@ -117,8 +107,9 @@ class SkynetRemote(GitAnnexESRP):
 			options = self.attempt_options(attempt)
 			options.custom_filename = os.path.basename(filename)
 			options.portal_upload_path += '/' + ''.join(filter(lambda x: x.isalnum(), key + str(time.time())))
-			keysize = self.keysize(options.custom_filename)
+			keysize = self.GETSIZE(options.custom_filename)
 			try:
+				self.DEBUG('Trying to upload %s' % filename)
 				if keysize >= 256 * 1024:
 					with open(filename, 'rb') as file_object:
 						def chunks():
@@ -165,9 +156,10 @@ class SkynetRemote(GitAnnexESRP):
 				if result.status_code != 200:
 					continue
 				metadata = {
-					"Content-Length": result.headers["Content-Length"],
 					"Content-Type": result.headers["Content-Type"]
 				}
+				if "Content-Length" in result.headers:
+					metadata["Content-Length"] = result.headers["Content-Length"]
 				if "Content-Disposition" in result.headers:
 					metadata["Content-Disposition"] = result.headers["Content-Disposition"]
 				if "Skynet-File-Metadata" in result.headers:
@@ -204,7 +196,7 @@ class SkynetRemote(GitAnnexESRP):
 
 	# retrieve key to file
 	def retrieve(self, key, filename):
-		keysize = self.keysize(key)
+		keysize = self.GETSIZE(key)
 		for url in self.GETURLS(key, 'sia://'):
 			try:
 				attempt = self.attempt('download')
