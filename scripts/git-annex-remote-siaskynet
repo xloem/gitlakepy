@@ -39,7 +39,7 @@ class SkynetRemote(GitAnnexESRP):
 				"https://skydrain.net",
 				#"https://www.siacdn.com", # really slow right now
 				"https://siasky.net",
-				#"https://skynethub.io",
+				"https://skynethub.io", # might get slow, comment out?
 				#"https://skynet.tutemwesi.com",
 			]
 		}
@@ -103,6 +103,9 @@ class SkynetRemote(GitAnnexESRP):
 	# store file in key
 	def store(self, key, filename):
 		attempt = self.attempt('upload')
+		# store should be changed to upload to every portal in list.
+		# preferably in parallel.
+		count = 0
 		while True:
 			options = self.attempt_options(attempt)
 			options.custom_filename = os.path.basename(filename)
@@ -128,6 +131,9 @@ class SkynetRemote(GitAnnexESRP):
 				else:
 					response = Skynet.upload_file_request(filename, options)
 				skylink = Skynet.uri_skynet_prefix() + response.json()['skylink']
+				count = count + 1
+				if count > 1:
+					break
 			except Exception as exception:
 				self.DEBUG(attempt['weburl'] + ': ' + repr(response.text))
 				self.DEBUG(attempt['weburl'] + ': ' + repr(exception))
