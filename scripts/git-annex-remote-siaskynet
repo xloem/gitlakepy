@@ -23,13 +23,15 @@ progname = argv[0]
 class SkynetRemote(GitAnnexESRP):
 	def __init__(self):
 		self.webportals = {
+                        'download_webonly': [
+				"https://sialoop.net", # getting occasional corruption 2020-05
+				"https://skynethub.io", # getting occasional corruption 2020-05
+                        ],
 			'download': [
 				"https://siasky.net",
 				"https://skydrain.net",
-				"https://sialoop.net",
-				"https://skynethub.io",
 				"https://skynet.luxor.tech",
-				"https://skynet.tutemwesi.com",
+				#"https://skynet.tutemwesi.com", # very slow to respond 2020-05
 				"https://www.siacdn.com",
 				"https://vault.lightspeedhosting.com"
 			],
@@ -37,7 +39,7 @@ class SkynetRemote(GitAnnexESRP):
 				"https://skynet.luxor.tech",
 				"https://sialoop.net",
 				"https://skydrain.net",
-				#"https://www.siacdn.com", # really slow right now
+				"https://www.siacdn.com", # really slow right now
 				"https://siasky.net",
 				"https://skynethub.io", # might get slow, comment out?
 				#"https://skynet.tutemwesi.com",
@@ -151,6 +153,7 @@ class SkynetRemote(GitAnnexESRP):
 		
 		download_options = Skynet.default_download_options()
 		urls = [portal_url + '/' + skylink for portal_url in self.webportals['download']]
+		urls.extend([portal_url + '/' + skylink for portal_url in self.webportals['download_webonly']])
 		return urls
 
 	def metadata(self, url):
