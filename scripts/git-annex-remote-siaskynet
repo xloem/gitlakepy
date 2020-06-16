@@ -9,7 +9,7 @@ import time
 from gitlake import GitAnnexESRP
 
 try:
-	from siaskynet import Skynet
+	from siaskynet.skynet import Skynet
 	import json
 except:
 	GitAnnexESRP().ERROR("** Sia Skynet python3 module 'siaskynet' not installed.")
