@@ -161,7 +161,7 @@ class SkynetRemote(GitAnnexESRP):
 	def metadata(self, url):
 		attempt = self.attempt('download')
 		while True:
-			options = self.attempt_options(attempt)
+			options = self.attempt_options(attempt, False)
 			try:
 				result = Skynet.metadata_request(url, options)
 				if result.status_code != 200:
