@@ -26,22 +26,24 @@ class SkynetRemote(GitAnnexESRP):
                         'download_webonly': [
 				"https://sialoop.net", # getting occasional corruption 2020-05
 				"https://skynethub.io", # getting occasional corruption 2020-05
+				"https://skynet.tutemwesi.com", # very slow to respond 2020-05
                         ],
 			'download': [
+                                "https://skyportal.xyz",
 				"https://siasky.net",
 				"https://skydrain.net",
 				"https://skynet.luxor.tech",
-				#"https://skynet.tutemwesi.com", # very slow to respond 2020-05
 				"https://www.siacdn.com",
 				"https://vault.lightspeedhosting.com"
 			],
 			'upload': [
+                                "https://skyportal.xyz",
 				"https://skynet.luxor.tech",
 				"https://sialoop.net",
 				"https://skydrain.net",
-				"https://www.siacdn.com", # really slow right now
+				"https://www.siacdn.com",
 				"https://siasky.net",
-				"https://skynethub.io", # might get slow, comment out?
+				"https://skynethub.io",
 				#"https://skynet.tutemwesi.com",
 			]
 		}
@@ -76,7 +78,7 @@ class SkynetRemote(GitAnnexESRP):
 
 	# return True if responsible for downloading passed url
 	def claimsUrl(self, url):
-		return url[0:6] == 'sia://'
+		return url[0:len(Skynet.uri_skynet_prefix())] == Skynet.uri_skynet_prefix()
 
 	def metadataGood(self, key, skylink, keysize):
 		try:
@@ -96,7 +98,7 @@ class SkynetRemote(GitAnnexESRP):
 	# return False or True if key is present
 	def isPresent(self, key):
 		keysize = self.GETSIZE(key)
-		for url in self.GETURLS(key, 'sia://'):
+		for url in self.GETURLS(key, Skynet.uri_skynet_prefix()):
 			if not self.metadataGood(key, url, keysize):
 				continue
 			return True
@@ -149,7 +151,8 @@ class SkynetRemote(GitAnnexESRP):
 			self.SETURLPRESENT(key, url)
 
 	def skylink_to_urls(self, skylink):
-		skylink = Skynet.strip_prefix(skylink)
+		if skylink.startswith(Skynet.uri_skynet_prefix()):
+			skylink = str[len(Skynet.uri_skynet_prefix()):]
 		
 		download_options = Skynet.default_download_options()
 		urls = [portal_url + '/' + skylink for portal_url in self.webportals['download']]
@@ -206,7 +209,7 @@ class SkynetRemote(GitAnnexESRP):
 	# retrieve key to file
 	def retrieve(self, key, filename):
 		keysize = self.GETSIZE(key)
-		for url in self.GETURLS(key, 'sia://'):
+		for url in self.GETURLS(key, Skynet.uri_skynet_prefix()):
 			try:
 				attempt = self.attempt('download')
 				while True:
@@ -221,7 +224,7 @@ class SkynetRemote(GitAnnexESRP):
 								continue
 							downloaded = 0
 							with open(filename, "wb") as output:
-								for data in result.iter_content(chunk_size = 128 * 1024):
+								for data in result.iter_content(chunk_size = None):
 									downloaded += len(data)
 									output.write(data)
 									self.PROGRESS(downloaded)
@@ -244,7 +247,7 @@ class SkynetRemote(GitAnnexESRP):
 	# remove a key's contents
 	def remove(self, key):
 		# not easy to delete from skynet atm, but making the file inaccessible lets fsck handle corrupt uploads as it expects
-		for skylink in self.GETURLS(key, 'sia://'):
+		for skylink in self.GETURLS(key, Skynet.uri_skynet_prefix()):
 			self.SETURIMISSING(key, skylink)
 			for url in self.skylink_to_urls(skylink):
 				self.SETURLMISSING(key, url)
