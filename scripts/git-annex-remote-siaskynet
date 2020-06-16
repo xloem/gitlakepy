@@ -139,7 +139,6 @@ class SkynetRemote(GitAnnexESRP):
 				if count > 1:
 					break
 			except Exception as exception:
-				self.DEBUG(attempt['weburl'] + ': ' + repr(response.text))
 				self.DEBUG(attempt['weburl'] + ': ' + repr(exception))
 				continue
 			if not self.metadataGood(options.custom_filename, skylink, keysize):
