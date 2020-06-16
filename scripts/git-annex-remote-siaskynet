@@ -152,7 +152,7 @@ class SkynetRemote(GitAnnexESRP):
 
 	def skylink_to_urls(self, skylink):
 		if skylink.startswith(Skynet.uri_skynet_prefix()):
-			skylink = str[len(Skynet.uri_skynet_prefix()):]
+			skylink = skylink[len(Skynet.uri_skynet_prefix()):]
 		
 		download_options = Skynet.default_download_options()
 		urls = [portal_url + '/' + skylink for portal_url in self.webportals['download']]
