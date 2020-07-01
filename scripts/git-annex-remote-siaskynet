@@ -23,13 +23,14 @@ progname = argv[0]
 class SkynetRemote(GitAnnexESRP):
 	def __init__(self):
 		self.webportals = {
-                        'download_webonly': [
+			'download_webonly': [
 				"https://sialoop.net", # getting occasional corruption 2020-05
 				"https://skynethub.io", # getting occasional corruption 2020-05
 				"https://skynet.tutemwesi.com", # very slow to respond 2020-05
-                        ],
+			],
 			'download': [
-                                "https://skyportal.xyz",
+				"https://skyportal.xyz",
+				"https://siasky.dev",
 				"https://siasky.net",
 				"https://skydrain.net",
 				"https://skynet.luxor.tech",
@@ -37,13 +38,14 @@ class SkynetRemote(GitAnnexESRP):
 				"https://vault.lightspeedhosting.com"
 			],
 			'upload': [
-                                "https://skyportal.xyz",
-				"https://skynet.luxor.tech",
+				"https://siasky.dev",
 				"https://sialoop.net",
+				"https://skyportal.xyz",
 				"https://skydrain.net",
 				"https://www.siacdn.com",
 				"https://siasky.net",
 				"https://skynethub.io",
+				"https://skynet.luxor.tech",
 				#"https://skynet.tutemwesi.com",
 			]
 		}
@@ -212,8 +214,8 @@ class SkynetRemote(GitAnnexESRP):
 			try:
 				attempt = self.attempt('download')
 				while True:
+					options = self.attempt_options(attempt, False)
 					try:
-						options = self.attempt_options(attempt, False)
 						result = Skynet.download_file_request(url, options, stream=True)
 						if result.status_code == 200:
 							total_length = result.headers.get('Content-Length')
