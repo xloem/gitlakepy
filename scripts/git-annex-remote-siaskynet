@@ -95,7 +95,8 @@ class SkynetRemote(GitAnnexESRP):
 			return True
 		except Exception as exception:
 			self.DEBUG(repr(exception))
-			self.DEBUG(traceback.format_exc())
+                        for line in traceback.format_exc().split('\n'):
+                            self.DEBUG(line)
 			return False
 
 
@@ -143,7 +144,9 @@ class SkynetRemote(GitAnnexESRP):
 				if count > 1:
 					break
 			except Exception as exception:
-				self.DEBUG(attempt['weburl'] + ': ' + traceback.format_exc())
+				self.DEBUG(attempt['weburl'] + ': ')
+                                for line in traceback.format_exc().split('\n'):
+                                    self.DEBUG(line)
 				continue
 			if not self.metadataGood(options.custom_filename, skylink, keysize):
 				self.DEBUG('Upload unsuccessful')
