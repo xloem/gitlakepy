@@ -5,6 +5,7 @@ import os
 import random
 import sys
 import time
+import traceback
 
 from gitlake import GitAnnexESRP
 
@@ -46,7 +47,7 @@ class SkynetRemote(GitAnnexESRP):
 				"https://siasky.net",
 				"https://skynethub.io",
 				"https://skynet.luxor.tech",
-				#"https://skynet.tutemwesi.com",
+				"https://skynet.tutemwesi.com",
 			]
 		}
 		self.options_getters = {
@@ -94,6 +95,7 @@ class SkynetRemote(GitAnnexESRP):
 			return True
 		except Exception as exception:
 			self.DEBUG(repr(exception))
+			self.DEBUG(traceback.format_exc())
 			return False
 
 
@@ -141,7 +143,7 @@ class SkynetRemote(GitAnnexESRP):
 				if count > 1:
 					break
 			except Exception as exception:
-				self.DEBUG(attempt['weburl'] + ': ' + repr(exception))
+				self.DEBUG(attempt['weburl'] + ': ' + traceback.format_exc())
 				continue
 			if not self.metadataGood(options.custom_filename, skylink, keysize):
 				self.DEBUG('Upload unsuccessful')
