@@ -1,0 +1,9 @@
+[submodule "submodules/AnnexRemote"]
+	path = submodules/AnnexRemote
+	url = https://github.com/Lykos153/AnnexRemote.git
+[submodule "submodules/pyFreenet"]
+	path = submodules/pyFreenet
+	url = https://github.com/freenet/pyFreenet.git
+[submodule "submodules/python-skynet"]
+	path = submodules/python-skynet
+	url = https://github.com/NebulousLabs/python-skynet.git
