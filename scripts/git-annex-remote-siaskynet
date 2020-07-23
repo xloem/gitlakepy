@@ -40,14 +40,14 @@ class SkynetRemote(GitAnnexESRP):
 			],
 			'upload': [
 				"https://siasky.dev",
-				"https://sialoop.net",
+				#"https://sialoop.net", # 2020-07-23 gave me 'too large' with a ~128MiB file
 				"https://skyportal.xyz",
-				"https://skydrain.net",
+                                #"https://skydrain.net", # '502 bad gateway' instead of skylink, 128MiB: 2020-07-23
 				"https://www.siacdn.com",
 				"https://siasky.net",
 				"https://skynethub.io",
-				"https://skynet.luxor.tech",
-				#"https://skynet.tutemwesi.com",
+                                #"https://skynet.luxor.tech", # '502 bad gateway' instead of skylink, 128MiB: 2020-07-23
+				"https://skynet.tutemwesi.com",
 			]
 		}
 		self.options_getters = {
@@ -145,7 +145,7 @@ class SkynetRemote(GitAnnexESRP):
 				try:
 					skylink = Skynet.uri_skynet_prefix() + response['skylink']
 				except KeyError:
-					self.DEBUG(response.message);
+					self.DEBUG(response['message']);
 					continue
 				count = count + 1
 				if count > 1:
