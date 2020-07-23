@@ -47,7 +47,7 @@ class SkynetRemote(GitAnnexESRP):
 				"https://siasky.net",
 				"https://skynethub.io",
 				"https://skynet.luxor.tech",
-				"https://skynet.tutemwesi.com",
+				#"https://skynet.tutemwesi.com",
 			]
 		}
 		self.options_getters = {
@@ -95,8 +95,8 @@ class SkynetRemote(GitAnnexESRP):
 			return True
 		except Exception as exception:
 			self.DEBUG(repr(exception))
-                        for line in traceback.format_exc().split('\n'):
-                            self.DEBUG(line)
+			for line in traceback.format_exc().split('\n'):
+				self.DEBUG(line)
 			return False
 
 
@@ -139,14 +139,21 @@ class SkynetRemote(GitAnnexESRP):
 						self.DEBUG('Server accepted last chunk.')
 				else:
 					response = Skynet.upload_file_request(filename, options)
-				skylink = Skynet.uri_skynet_prefix() + response.json()['skylink']
+				for line in response.text.split('\n'):
+					self.DEBUG(line)
+				response = response.json()
+				try:
+					skylink = Skynet.uri_skynet_prefix() + response['skylink']
+				except KeyError:
+					self.DEBUG(response.message);
+					continue
 				count = count + 1
 				if count > 1:
 					break
 			except Exception as exception:
 				self.DEBUG(attempt['weburl'] + ': ')
-                                for line in traceback.format_exc().split('\n'):
-                                    self.DEBUG(line)
+				for line in traceback.format_exc().split('\n'):
+					self.DEBUG(line)
 				continue
 			if not self.metadataGood(options.custom_filename, skylink, keysize):
 				self.DEBUG('Upload unsuccessful')
