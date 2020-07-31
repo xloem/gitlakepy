@@ -43,10 +43,10 @@ class SkynetRemote(GitAnnexESRP):
 				#"https://sialoop.net", # 2020-07-23 gave me 'too large' with a ~128MiB file
 				"https://skyportal.xyz",
 				"https://skydrain.net", # '502 bad gateway' instead of skylink, 128MiB: 2020-07-23
-				"https://www.siacdn.com",
+                                #"https://www.siacdn.com", # '504 Gateway Timed out' instead of skylink, 128MiB: 2020-07-31
 				#"https://siasky.net",  # '504 Gateway Time-out' instead of skylink, 128MiB: 2020-07-23, 2020-07-24
                                 #"https://skynethub.io", # 'request entity too large' instead of skylink, 128MiB: 2020-07-31
-				#"https://skynet.luxor.tech", # '502 bad gateway' instead of skylink, 128MiB: 2020-07-23
+				"https://skynet.luxor.tech", # '502 bad gateway' instead of skylink, 128MiB: 2020-07-23
 				#"https://skynet.tutemwesi.com", # 'unable to upload large skyfile', 128MiB: 2020-07-24
 			]
 		}
