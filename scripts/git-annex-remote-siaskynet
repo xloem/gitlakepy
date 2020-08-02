@@ -25,17 +25,17 @@ class SkynetRemote(GitAnnexESRP):
 	def __init__(self):
 		self.webportals = {
 			'download_webonly': [
-				"https://sialoop.net", # getting occasional corruption 2020-05
-				"https://skynethub.io", # getting occasional corruption 2020-05
-				"https://skynet.tutemwesi.com", # very slow to respond 2020-05
+				"https://skydrain.net", # very slow to respond to metadata query 2020-08-02
+				"https://www.siacdn.com", # very slow to respond to metadata query 2020-08-02
+				"https://siasky.dev", # very slow to respond to metadata query 2020-08-02
+				"https://siasky.net", # very slow to respond to metadata query 2020-08-02
 			],
 			'download': [
+				"https://skynet.tutemwesi.com", # very slow to respond 2020-05
+				"https://sialoop.net", # getting occasional corruption 2020-05
+				"https://skynethub.io", # getting occasional corruption 2020-05
 				"https://skyportal.xyz",
-				"https://siasky.dev",
-				"https://siasky.net",
-				"https://skydrain.net",
 				"https://skynet.luxor.tech",
-				"https://www.siacdn.com",
 				"https://vault.lightspeedhosting.com"
 			],
 			'upload': [
