@@ -232,7 +232,7 @@ class SkynetRemote(GitAnnexESRP):
 						if result.status_code == 200:
 							total_length = result.headers.get('Content-Length')
 							if keysize is not None and total_length is not None and keysize != int(total_length):
-								self.ERROR('Remote size is small: %d' % total_length)
+								self.ERROR('Remote size is small: %d' % int(total_length))
 								result.close()
 								continue
 							downloaded = 0
