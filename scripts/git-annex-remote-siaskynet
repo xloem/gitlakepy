@@ -65,7 +65,7 @@ class SkynetRemote(GitAnnexESRP):
 		random.shuffle(attempt['weburls'])
 		return attempt
 
-	def attempt_options(self, attempt, try_forever = True):
+	def attempt_options(self, attempt, task, try_forever = True):
 		if len(attempt['weburls']) == 0:
 			if try_forever:
 				attempt['weburls'] = [*self.webportals[attempt['type']]]
@@ -73,7 +73,7 @@ class SkynetRemote(GitAnnexESRP):
 			else:
 				raise Exception('tried all portals')
 		weburl = attempt['weburls'].pop()
-		self.DEBUG('Trying webportal ' + weburl)
+		self.DEBUG('Trying webportal ' + weburl + ' for ' + task)
 		attempt['weburl'] = weburl
 		options = attempt['getter']()
 		options.portal_url = weburl
@@ -116,7 +116,7 @@ class SkynetRemote(GitAnnexESRP):
 		# preferably in parallel.
 		count = 0
 		while True:
-			options = self.attempt_options(attempt)
+			options = self.attempt_options(attempt, key)
 			options.custom_filename = os.path.basename(filename)
 			options.portal_upload_path += '/' + ''.join(filter(lambda x: x.isalnum(), key + str(time.time())))
 			keysize = self.GETSIZE(options.custom_filename)
@@ -226,7 +226,7 @@ class SkynetRemote(GitAnnexESRP):
 			try:
 				attempt = self.attempt('download')
 				while True:
-					options = self.attempt_options(attempt, False)
+					options = self.attempt_options(attempt, url, False)
 					try:
 						result = Skynet.download_file_request(url, options, stream=True)
 						if result.status_code == 200:

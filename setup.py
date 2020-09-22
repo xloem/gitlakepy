@@ -2,7 +2,7 @@
 from distutils.core import setup
 
 setup(name='gitlakepy',
-      version='0.22',
+      version='0.23',
       description='Decentralized special remotes for git-annex',
       author='Karl Semich',
       author_email='gmkarl@gmail.com',
