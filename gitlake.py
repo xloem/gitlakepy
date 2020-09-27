@@ -26,7 +26,7 @@ class GitAnnexESRP(threading.Thread):
       self.incomingError = None
       self.start()
       self.VERSION(1)
-      while self.isAlive() or not self.handling_queue.empty():
+      while self.is_alive() or not self.handling_queue.empty():
         try:
           command, args = self.handling_queue.get(True, 1)
         except Queue.Empty:
