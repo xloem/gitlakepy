@@ -1,0 +1,61 @@
+#!/usr/bin/env python3
+
+from annexremote import Master
+from annexremote import SpecialRemote
+from annexremote import RemoteError
+
+from polyglot import Upload
+
+# annexremote
+
+# raise RemoteError on error
+class MyRemote(SpecialRemote):
+	def __init__(self, annex):
+		super().__init__(annex)
+		self.configs = {
+			'key': "A private key in WIF format to upload files with."
+		}
+	def initremote(self):
+		# initialize in repo, e.g. create folders or change settings
+		if self.annex.getconfig("key") == "":
+			raise RemoteError("private 'key' configuration setting is required")
+	def prepare(self):
+		# prepare to be used for transfers, e.g. open connection
+		pass
+	def transfer_store(self, key, filename):
+		uploader = Upload(self.annex.getconfig("key"), utxo_min_confirmations=0)
+		# self.annex.progress(size) can report progress
+		try:
+			txid = uploader.upload_bcat(filename)
+		except ValueError as e:
+			raise RemoteError(' '.join((*e.args, 'Your BSV address is: ' + uploader.address)))
+		except ConnectionError as e:
+			raise RemoteError(' '.join(e.args))
+		self.annex.seturlpresent(key, 'BCAT://' + txid)
+		self.annex.seturipresent(key, 'https://bico.media/' + txid)
+	def transfer_retrieve(self, key, filename):
+		for url in self.annex.geturls(key, 'BCAT://'):
+			txid = url[7:]
+			# write 'key' to local 'filename'
+			raise RemoteError('download unimplemented')
+	def checkpresent(self, key):
+		pass
+		# return True / False
+	def remove(self, key):
+		pass
+		# remove key, return silently if not exist
+	def claimurl(self, url):
+		return url[0:7] == 'BCAT://'
+	def getavailability(self):
+		return "global"
+	def getcost(self):
+		return 1000 # veryExpensiveRemoteCost
+
+def main():
+	master = Master()
+	remote = MyRemote(master)
+	master.LinkRemote(remote)
+	master.Listen()
+
+if __name__ == "__main__":
+	main()

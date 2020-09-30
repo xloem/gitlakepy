@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 from distutils.core import setup
 
-setup(name='gitlakepy',
-      version='0.25',
+setup(name='gitlake',
+      version='0.26',
       description='Decentralized special remotes for git-annex',
       author='Karl Semich',
-      author_email='gmkarl@gmail.com',
+      author_email='0xloem@gmail.com',
       url='https://github.com/gmkarl/gitlakepy',
       py_modules=['gitlake'],
-      scripts=['scripts/git-annex-remote-freenet','scripts/git-annex-remote-siaskynet'],
-      requires=['fcp', 'siaskynet'],
+      scripts=['scripts/git-annex-remote-freenet','scripts/git-annex-remote-siaskynet','scripts/git-annex-remote-bsv'],
+      install_requires=['fcp', 'siaskynet', 'polyglot-bitcoin', 'annexremote'],
      )
