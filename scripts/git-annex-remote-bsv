@@ -33,14 +33,17 @@ class BSVRemote(SpecialRemote):
 		}
 	def initremote(self):
 		# initialize in repo, e.g. create folders or change settings
-		if self.annex.getconfig('key') == '':
-			raise RemoteError('private "key" configuration setting is required')
 		if self.annex.getconfig('network') == '':
 			self.annex.setconfig('network', 'main')
 		if self.annex.getconfig('confirmations') == '':
 			self.annex.setconfig('confirmations', '4')
 		if self.annex.getconfig('fee') == '':
 			self.annex.setconfig('fee', '0.5')
+		if self.annex.getconfig('key') == '':
+			keygen = Upload(network=self.annex.getconfig('network'))
+			self.annex.setconfig('key', keygen.to_wif())
+			self.annex.info('No private key supplied, so generated a new one: ' + self.annex.getconfig('key'))
+			self.annex.info('Send bsv to ' + keygen.address)
 		self.prepare()
 	def prepare(self):
 		# prepare to be used for transfers, e.g. open connection
