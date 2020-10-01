@@ -19,6 +19,31 @@ git-annex-remote-siaskynet
     None configured.
 
 
+git-annex-remote-bsv
+  A remote for Bitcoin SV's B:// and BCAT:// protocols, using the bitsv and polyglot libraries.
+  Like siaskynet, this is mostly just using third party servers for now, but bitsv does support connecting
+  directly to a local node.
+  Right now the code needs xloem's 'merged' branch of the polyglot library: https://github.com/xloem/polyglot
+  
+  Usage:
+  $ git annex initremote bsv type=external encryption=<type> externaltype=bsv key=<private key in WIF format>
+ 
+  Additional Options:
+    confirmations=4
+      The number of block confirmations to wait for before confirming storage of a file.
+      To store quickly and wait after, you can set this to 1 or 0 with enableremote, upload,
+      and then afterwards set it back to 4 or so and let `git annex fsck -f bsv` do the waiting.
+
+    fee=0.5
+      The number of satoshis per byte to pay for uploads.  Higher fees produce faster acceptance by the network.
+      It may be possible to lower this to 0.25 if the user has a few hours of patience and the API server
+      is willing.
+
+    network=main
+      The network to connect to.  The other two networks are 'test' and 'stn', which are likely to be
+      very cheap but could occasionally delete everything.
+
+
 git-annex-remote-freenet
   A freenet remote for git-annex.
 
