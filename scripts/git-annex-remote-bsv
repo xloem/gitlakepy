@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 
+#########
+# this uses xloem's PRs to polyglot, on the 'merged' branch of https://github.com/xloem/polyglot
+#########
+
 from annexremote import Master
 from annexremote import SpecialRemote
 from annexremote import RemoteError
@@ -83,8 +87,17 @@ class MyRemote(SpecialRemote):
 			return
 		for url in self.annex.geturls(key, 'BCAT://'):
 			txid = url[7:]
-			# write 'key' to local 'filename'
-			raise RemoteError('download unimplemented')
+			fields = self.downloader.bcat_linker_fields_from_txid(txid)
+			if not fields:
+				continue
+			transferred = 0
+			with open(filename, 'wb') as file:
+				for txid in fields['parts']:
+					data = self.downloader.bcat_part_binary_from_txid(txid)
+					transferred += len(data)
+					self.annex.progress(transferred)
+					file.write(data)
+			return
 		raise RemoteError('not found')
 	def checkpresent(self, key):
 		txs = self.uploader.get_transactions()
@@ -96,9 +109,13 @@ class MyRemote(SpecialRemote):
 			txid = url[7:]
 			if txid not in txs:
 				continue
-			transaction = self.uploader.get_transaction(txid)
-			# let's check that all the bcat parts are there
-			raise RemoteError('todo: check parts')
+			fields = self.downloader.bcat_linker_fields_from_txid(txid)
+			if not fields:
+				continue
+			for txid in fields['parts']:
+				if txid not in txs:
+					continue
+			return True
 		return False
 	def remove(self, key):
 		# remove key, return silently if not exist
@@ -133,9 +150,10 @@ class MyRemote(SpecialRemote):
 			if len(confirmed):
 				self.annex.info(str(len(confirmed)) + ' transactions confirmed!')
 				txids.difference_update(set(confirmed))
-			if 0 == len(unconfirmed) + len(missing):
+			missingorunconfirmed = missing + unconfirmed
+			if 0 == len(missingorunconfirmed):
 				break;
-			self.annex.info(str(len(missing) + len(unconfirmed)) + ' transactions remaining ... confirmations range = [' + str(minconfs) + ',' + str(maxconfs) + ']')
+			self.annex.info(str(len(missingorunconfirmed)) + ' transactions remaining ... confirmations range = [' + str(minconfs) + ',' + str(maxconfs) + '] txid = ' + missingorunconfirmed[0])
 			self.annex.info('Waiting 10 minutes...')
 			sleep(60 * 10)
 			
