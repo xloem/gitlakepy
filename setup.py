@@ -2,11 +2,11 @@
 from distutils.core import setup
 
 setup(name='gitlake',
-      version='0.26',
+      version='0.27',
       description='Decentralized special remotes for git-annex',
       author='Karl Semich',
       author_email='0xloem@gmail.com',
-      url='https://github.com/gmkarl/gitlakepy',
+      url='https://github.com/xloem/gitlakepy',
       py_modules=['gitlake'],
       scripts=['scripts/git-annex-remote-freenet','scripts/git-annex-remote-siaskynet','scripts/git-annex-remote-bsv'],
       install_requires=['fcp', 'siaskynet', 'polyglot-bitcoin', 'annexremote'],

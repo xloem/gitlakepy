@@ -4,7 +4,9 @@ from annexremote import Master
 from annexremote import SpecialRemote
 from annexremote import RemoteError
 
-from polyglot import Upload
+from polyglot import Upload, Download
+
+from time import sleep
 
 # annexremote
 
@@ -13,43 +15,133 @@ class MyRemote(SpecialRemote):
 	def __init__(self, annex):
 		super().__init__(annex)
 		self.configs = {
-			'key': "A private key in WIF format to upload files with."
+			'key': 'A private key in WIF format to upload files with.',
+			'network': 'The BSV network to connect to, default "main".  The other options are "test" and "stn".  These other test networks are very cheap but could occasionally delete everything.',
+			'confirmations':'The number of confirmations to wait for before completing.  Default 4',
 		}
+		self.confirmations = 0
 	def initremote(self):
 		# initialize in repo, e.g. create folders or change settings
-		if self.annex.getconfig("key") == "":
-			raise RemoteError("private 'key' configuration setting is required")
+		if self.annex.getconfig('key') == '':
+			raise RemoteError('private "key" configuration setting is required')
+		if self.annex.getconfig('network') == '':
+			self.annex.setconfig('network', 'main')
+		if self.annex.getconfig('confirmations') == '':
+			self.annex.setconfig('confirmations', '4')
+		self.prepare()
 	def prepare(self):
 		# prepare to be used for transfers, e.g. open connection
-		pass
-	def transfer_store(self, key, filename):
-		uploader = Upload(self.annex.getconfig("key"), utxo_min_confirmations=0)
-		# self.annex.progress(size) can report progress
+		self.annex.info('Connecting to API server')
+		self.uploader = Upload(self.annex.getconfig('key'), network=self.annex.getconfig('network'), utxo_min_confirmations=0, fee=0.5)
+		self.downloader = Download(network=self.annex.getconfig('network'))
+		self.annex.info('Address: ' + self.uploader.address + ' Balance: ' + self.uploader.get_balance() + ' sat')
+	def _store_bcat(self, key, filename):
 		try:
-			txid = uploader.upload_bcat(filename)
+			self.annex.info('Splitting into chunks using BCAT ...')
+			txid = self.uploader.upload_bcat(filename)
+			self.waitForConfirmations([txid])
+			self.annex.seturipresent(key, 'BCAT://' + txid)
+			self.annex.info('Uploaded to BCAT://' + txid)
+			return txid
 		except ValueError as e:
-			raise RemoteError(' '.join((*e.args, 'Your BSV address is: ' + uploader.address)))
+			# one of the reasons for this is there being too few utxos for the partcount
+			utxos = self.uploader.get_unspents()
+			amounts = [utxo.amount for utxo in utxos]
+			amounts.sort()
+			self.annex.info('Your utxos are sized at ' + ' '.join([str(amount) for amount in amounts]) + ' sat.')
+			if (len(amounts) > 1 and amounts[1] < 100000) or amounts[-1] > 200000:
+				self.annex.info(' '.join((*e.args, '  ...  Combining and splitting transaction to produce fresh UTXOs ...')))
+				self.uploader.split_all_utxos()
+				return self._store_bcat(key, filename)
+			raise RemoteError(' '.join((*e.args, '  Your BSV address is: ' + self.uploader.address)))
 		except ConnectionError as e:
 			raise RemoteError(' '.join(e.args))
-		self.annex.seturlpresent(key, 'BCAT://' + txid)
-		self.annex.seturipresent(key, 'https://bico.media/' + txid)
+	def transfer_store(self, key, filename):
+		# self.annex.progress(size) can report progress
+		try:
+			self.annex.info('Trying out uploading as B (100kb maximum) ...')
+			txid = self.uploader.upload_b(filename)
+			self.waitForConfirmations([txid])
+			self.annex.seturipresent(key, 'B://' + txid)
+			#self.annex.seturlpresent(key, 'https://x.bitfs.network/' + txid + '.out.0.
+			self.annex.info('Uploaded to B://' + txid)
+		except ValueError as e:
+			self.annex.info(e.args[0])
+			if e.args[0].startswith('Total bytes in OP_RETURN cannot exceed'):
+				txid = self._store_bcat(key, filename)
+			else:
+				raise RemoteError(' '.join((*e.args, '  Your BSV address is: ' + self.uploader.address)))
+		except ConnectionError as e:
+			raise RemoteError(' '.join(e.args))
+		self.annex.seturlpresent(key, 'https://bico.media/' + txid)
+		# now we want to wait for confirmations # <=======================
+		#self.annex.info('Remaining balance: ' + self.uploader.get_balance() + ' sat')
 	def transfer_retrieve(self, key, filename):
+		for url in self.annex.geturls(key, 'B://'):
+			txid = url[4:]
+			self.downloader.b_file_from_txid(txid, filename)
+			return
 		for url in self.annex.geturls(key, 'BCAT://'):
 			txid = url[7:]
 			# write 'key' to local 'filename'
 			raise RemoteError('download unimplemented')
+		raise RemoteError('not found')
 	def checkpresent(self, key):
-		pass
-		# return True / False
+		txs = self.uploader.get_transactions()
+		for url in self.annex.geturls(key, 'B://'):
+			txid = url[4:]
+			if txid in txs:
+				return True
+		for url in self.annex.geturls(key, 'BCAT://'):
+			txid = url[7:]
+			if txid not in txs:
+				continue
+			transaction = self.uploader.get_transaction(txid)
+			# let's check that all the bcat parts are there
+			raise RemoteError('todo: check parts')
+		return False
 	def remove(self, key):
-		pass
 		# remove key, return silently if not exist
+		if self.checkpresent(key):
+			raise RemoteError('bsv content is immutable')
 	def claimurl(self, url):
-		return url[0:7] == 'BCAT://'
+		return url[0:7] == 'BCAT://' or url[0:4] == 'B://'
 	def getavailability(self):
-		return "global"
-	def getcost(self):
-		return 1000 # veryExpensiveRemoteCost
+		return 'global'
+	def waitForConfirmations(self, txids):
+		confirmations = self.annex.getconfig('confirmations')
+		self.annex.info('Waiting for ' + str(confirmations) + ' confirmation(s) of ' + str(len(txids)) +  ' transactions ... ')
+		txids = set(txids)
+		while True:
+			self.annex.info('Asking for confirmation count ...')
+			confirmations = zip(txids, self.uploader.confirmations(list(txids)))
+			confirmed = []
+			unconfirmed = []
+			missing = []
+			minconfs = self.confirmations
+			maxconfs = 0
+			for txid, count in confirmations:
+				if count is None:
+					missing.append(txid)
+					minconfs = 0
+				elif count >= self.confirmations:
+					confirmed.append(txid)
+				else:
+					unconfirmed.append((txid, count))
+					minconfs = min(count, minconfs)
+					maxconfs = max(count, maxconfs)
+			if len(confirmed):
+				self.annex.info(str(len(confirmed)) + ' transactions confirmed!')
+				txids.difference_update(set(confirmed))
+			if 0 == len(unconfirmed) + len(missing):
+				break;
+			self.annex.info(str(len(missing) + len(unconfirmed)) + ' transactions remaining ... confirmations range = [' + str(minconfs) + ',' + str(maxconfs) + ']')
+			self.annex.info('Waiting 10 minutes...')
+			sleep(60 * 10)
+			
+			
+
+		
 
 def main():
 	master = Master()
@@ -57,5 +149,5 @@ def main():
 	master.LinkRemote(remote)
 	master.Listen()
 
-if __name__ == "__main__":
+if __name__ == '__main__':
 	main()
