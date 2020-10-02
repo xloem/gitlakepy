@@ -15,6 +15,7 @@ from bitsv import op_return
 from bitsv.transaction import sanitize_tx_data, create_p2pkh_transaction
 from bitsv.network.meta import Unspent
 
+from flock import Flock, LOCK_EX
 from requests.exceptions import HTTPError
 from os import path
 from time import sleep
@@ -51,97 +52,110 @@ class BSVRemote(SpecialRemote):
 		self.uploader = Upload(self.annex.getconfig('key'), network=self.annex.getconfig('network'), utxo_min_confirmations=0, fee=float(self.annex.getconfig('fee')))
 		self.downloader = Download(network=self.annex.getconfig('network'))
 		self.annex.info('Address: ' + self.uploader.address + ' Balance: ' + self.uploader.get_balance() + ' sat')
+		self.annex.info('Network: ' + self.annex.getconfig('network') + ' Fee: ' + self.annex.getconfig('fee') + ' Confs: ' + self.annex.getconfig('confirmations'))
+		self.lockfilename = self.annex.getgitdir() + '/' + self.annex.getuuid() + '.lock'
+		self.lockfile = open(self.lockfilename, 'w')
 	def transfer_store(self, key, filename):
+		self.annex.info('TRANSFER STORE ' + key + ' ' + filename)
 		try:
 			return self._transfer_store(key, filename)
 		except ConnectionError as e:
 			raise RemoteError(' '.join(e.args).replace('\n','  '))
 		except HTTPError as e:
-			raise RemoteError(' '.join(e.args).replace('\n','  '))
+			raise RemoteError(' '.join([e.request.url,str(e.request.headers),*e.args,e.response.text]).replace('\n','  '))
 	def _transfer_store(self, key, filename):
-		size = path.getsize(filename) 
-		balance = int(self.uploader.get_balance())
+		neededconfs = int(self.annex.getconfig('confirmations'))
 		fee = float(self.annex.getconfig('fee'))
+		size = path.getsize(filename) 
 		cost = int(size * fee) + 200000
 		self.annex.info('Upload maxcost: ' + str(cost) + ' sat (' + str(cost / 100000000.) + ' BSV)')
-		if balance < cost:
-			needed = cost - balance
-			raise RemoteError('Please send ' + str(needed / 100000000.) + ' BSV to ' + self.uploader.address)
-		else:
-			self.annex.info('After upload minremaining: ' + str(balance - cost) + ' sat')
-		media_type = self.uploader.get_media_type_for_file_name(filename)
-		encoding = self.uploader.get_encoding_for_file_name(filename)
-		file_name = self.uploader.get_filename(filename)
-		if size > 99000:
-			# note: parallel upload will need more carefulness, maybe the ability
-			# to recreate bcat parts if they fail
-
-			# bcat
-			self.annex.info('Key is large.  Uploading in parts using BCAT:// ...')
-
-			txs = {}
-
-			utxos_available = self.uploader.get_unspents()
-			utxos_to_split = []
-			sum = 0
-			for utxo in utxos_available:
-				utxos_to_split.append(utxo)
-				sum += utxo.amount
-				if sum >= cost:
-					break
-			split_outputs = self.uploader.get_split_outputs(utxos_to_split)
-			utxos_to_split, split_outputs = sanitize_tx_data(utxos_to_split, split_outputs, fee, self.uploader.address, combine=True, message=None, compressed=self.uploader.is_compressed(), custom_pushdata=False)
-			txdata = create_p2pkh_transaction(self.uploader, utxos_to_split, split_outputs, False)
-			txid = self.uploader.send_rawtx(txdata)
-			txs[txid] = txdata
-
-			# make utxos from split_outputs
-			utxos = []
-			for txindex in range(len(split_outputs)):
-				utxos.append(Unspent(amount = split_outputs[txindex][1], confirmations = 0, txid = txid, txindex = txindex))
-
-			# upload parts and store txdata to resend dropped ones
-			parts = []
-			progress = 0
-			with open(filename, 'rb') as file:
-				while True:
-					self.annex.progress(progress)
-					data = file.read(SPACE_AVAILABLE_PER_TX_BCAT_PART)
-					if len(data) <= 0:
+		self.annex.info('Locking ' + self.lockfilename + ' for ' + key)
+		with Flock(self.lockfile, LOCK_EX):
+			self.annex.info('Locked ' + self.lockfilename + ' for ' + key)
+			balance = int(self.uploader.get_balance())
+			if balance < cost:
+				needed = cost - balance
+				self.annex.info('Insufficient balance')
+				raise RemoteError('Please send ' + str(needed / 100000000.) + ' BSV to ' + self.uploader.address)
+			else:
+				self.annex.info('After upload minremaining: ' + str(balance - cost) + ' sat')
+			media_type = self.uploader.get_media_type_for_file_name(filename)
+			encoding = self.uploader.get_encoding_for_file_name(filename)
+			file_name = self.uploader.get_filename(filename)
+			if size > 99000:
+				# note: parallel upload will need more carefulness, maybe the ability
+				# to recreate bcat parts if they fail
+	
+				# bcat
+				self.annex.info('Key is large.  Uploading in parts using BCAT:// ...')
+	
+				txs = {}
+	
+				utxos_available = self.uploader.get_unspents()
+				utxos_to_split = []
+				sum = 0
+				for utxo in utxos_available:
+					utxos_to_split.append(utxo)
+					sum += utxo.amount
+					if sum >= cost:
 						break
-					pushdata = op_return.create_pushdata([(BCATPART, 'utf-8'),(data.hex(), 'hex')])
-					utxo = utxos.pop()
-					txdata = self.uploader.create_transaction(outputs=[], message=pushdata, fee=fee, combine=False, custom_pushdata=True, unspents=[utxo])
-					txid = self.uploader.send_rawtx(txdata)
-					progress += len(data)
-					txs[txid] = txdata
-					parts.append(txid)
-			if progress < size:
-				self.annex.info('WARNING: Failed reading file from disk.  May be only partially uploaded.  Continuing with upload so that link to partial data is saved at end.  Resume not implemented.')
-			
-			txdata = self.uploader.bcat_linker_create_from_txids(parts, media_type, encoding, file_name, info='git-annex-remote-bsv', flags=' ', utxos=utxos)
-			txid = self.uploader.send_rawtx(txdata)
-			txs[txid] = txdata
-			self.annex.progress(progress)
-			
-			self.waitForConfirmations(txs)
-			self.annex.seturipresent(key, 'BCAT://' + txid)
-			self.annex.info('Uploaded to BCAT://' + txid)
-		else:
-			# b
-			self.annex.info('Key is small.  Uploading as B:// ...')
-			with open(filename, 'rb') as file:
-				data = file.read()
-			txdata = self.uploader.b_create_rawtx_from_binary(data, media_type, encoding, file_name)
-			data = None
-			txid = self.uploader.send_rawtx(txdata)
-			self.waitForConfirmations({txid:txdata})
-			self.annex.seturipresent(key, 'B://' + txid)
-			if size > 512:
-				self.annex.seturlpresent(key, 'https://x.bitfs.network/' + txid + '.out.0.3')
-			self.annex.info('Uploaded to B://' + txid)
-		self.annex.seturlpresent(key, 'https://bico.media/' + txid)
-		self.annex.info('Remaining balance: ' + self.uploader.get_balance() + ' sat')
+				split_outputs = self.uploader.get_split_outputs(utxos_to_split)
+				utxos_to_split, split_outputs = sanitize_tx_data(utxos_to_split, split_outputs, fee, self.uploader.address, combine=True, message=None, compressed=self.uploader.is_compressed(), custom_pushdata=False)
+				txdata = create_p2pkh_transaction(self.uploader, utxos_to_split, split_outputs, False)
+				txid = self.uploader.send_rawtx(txdata)
+				txs[txid] = txdata
+	
+				# make utxos from split_outputs
+				utxos = []
+				for txindex in range(len(split_outputs)):
+					utxos.append(Unspent(amount = split_outputs[txindex][1], confirmations = 0, txid = txid, txindex = txindex))
+	
+				# upload parts and store txdata to resend dropped ones
+				parts = []
+				progress = 0
+				with open(filename, 'rb') as file:
+					while True:
+						self.annex.progress(progress)
+						data = file.read(SPACE_AVAILABLE_PER_TX_BCAT_PART)
+						if len(data) <= 0:
+							break
+						pushdata = op_return.create_pushdata([(BCATPART, 'utf-8'),(data.hex(), 'hex')])
+						utxo = utxos.pop()
+						txdata = self.uploader.create_transaction(outputs=[], message=pushdata, fee=fee, combine=False, custom_pushdata=True, unspents=[utxo])
+						txid = self.uploader.send_rawtx(txdata)
+						progress += len(data)
+						txs[txid] = txdata
+						parts.append(txid)
+				if progress < size:
+					self.annex.info('WARNING: Failed reading file from disk.  May be only partially uploaded.  Continuing with upload so that link to partial data is saved at end.  Resume not implemented.')
+				
+				txdata = self.uploader.bcat_linker_create_from_txids(parts, media_type, encoding, file_name, info='git-annex-remote-bsv', flags=' ', utxos=utxos)
+				txid = self.uploader.send_rawtx(txdata)
+				txs[txid] = txdata
+				self.annex.progress(progress)
+				
+				self.annex.seturipresent(key, 'BCAT://' + txid)
+	
+				url = 'BCAT://' + txid
+			else:
+				# b
+				self.annex.info('Key is small.  Uploading as B:// ...')
+				with open(filename, 'rb') as file:
+					data = file.read()
+				txdata = self.uploader.b_create_rawtx_from_binary(data, media_type, encoding, file_name)
+				data = None
+				txid = self.uploader.send_rawtx(txdata)
+				self.annex.seturipresent(key, 'B://' + txid)
+				if size > 512:
+					self.annex.seturlpresent(key, 'https://x.bitfs.network/' + txid + '.out.0.3')
+				txs = {txid:txdata}
+				url = 'B://' + txid
+			self.waitForConfirmations(0, txs.copy())
+			self.annex.seturlpresent(key, 'https://bico.media/' + txid)
+			self.annex.info('Remaining balance: ' + self.uploader.get_balance() + ' sat')
+		self.annex.info('Unlocked ' + self.lockfilename + ' for ' + key)
+		self.waitForConfirmations(neededconfs, txs)
+		self.annex.info('Uploaded to ' + url)
 	def transfer_retrieve(self, key, filename):
 		for url in self.annex.geturls(key, 'B://'):
 			txid = url[4:]
@@ -163,46 +177,45 @@ class BSVRemote(SpecialRemote):
 		raise RemoteError('not found')
 	def _checkpresent(self, key, removemissing = False):
 		result = False
+		neededconfs = int(self.annex.getconfig('confirmations'))
 		for url in self.annex.geturls(key, 'B://'):
 			txid = url[4:]
-			if self.waitForConfirmations([txid]):
+			if self.waitForConfirmations(neededconfs, [txid]):
 				result = True
 				if not removemissing:
 					break
 			elif removemissing:
-				self.annex.seturlmissing(key, url)
+				self.annex.seturimissing(key, url)
 		for url in self.annex.geturls(key, 'BCAT://'):
 			txid = url[7:]
 			txids = [txid]
 			fields = self.downloader.bcat_linker_fields_from_txid(txid)
 			if not fields:
 				if removemissing:
-					self.annex.seturlmissing(key, url)
+					self.annex.seturimissing(key, url)
 				continue
 			txids.extend(fields['parts'])
-			if self.waitForConfirmations(txids):
+			if self.waitForConfirmations(neededconfs, txids):
 				result = True
 				if not removemissing:
 					break
 			elif removemissing:
-				self.annex.seturlmissing(key, url)
+				self.annex.seturimissing(key, url)
 		return result
 	def checkpresent(self, key):
 		return self._checkpresent(key, False)
 	def remove(self, key):
 		# remove key, return silently if not exist
-		if self._checkpresent(key, true): # keys that failed broadcasting are removed
+		if self._checkpresent(key, True): # keys that failed broadcasting are removed
 			raise RemoteError('bsv content is immutable')
 	def claimurl(self, url):
 		return url[0:7] == 'BCAT://' or url[0:4] == 'B://'
 	def getavailability(self):
 		return 'global'
-	def waitForConfirmations(self, txs):  # rebroadcasts if txs is a dict, otherwise returns False if lost
-		neededconfs = int(self.annex.getconfig('confirmations'))
+	def waitForConfirmations(self, neededconfs, txs):  # rebroadcasts if txs is a dict, otherwise returns False if lost
 		self.annex.info('Checking for ' + str(neededconfs) + ' confirmation(s) of ' + str(len(txs)) +  ' transactions ... ')
 		txids = set(txs)
 		while True:
-			self.annex.info('Asking for confirmation count ...')
 			confirmations = zip(txids, self.uploader.confirmations(list(txids)))
 			confirmed = []
 			unconfirmed = []
