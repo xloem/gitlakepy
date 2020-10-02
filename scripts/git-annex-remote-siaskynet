@@ -10,7 +10,7 @@ import traceback
 from gitlake import GitAnnexESRP
 
 try:
-	from siaskynet.skynet import Skynet
+	from siaskynet import SkynetClient
 	import json
 except:
 	GitAnnexESRP().ERROR("** Sia Skynet python3 module 'siaskynet' not installed.")
@@ -52,16 +52,11 @@ class SkynetRemote(GitAnnexESRP):
 				#"https://skynet.tutemwesi.com", # 'unable to upload large skyfile', 128MiB: 2020-07-24; 502 bad gateway instead of skylink 3.1G 2020-09-28
 			]
 		}
-		self.options_getters = {
-			'download': Skynet.default_download_options,
-			'upload': Skynet.default_upload_options
-		}
 		GitAnnexESRP.__init__(self)
 
 	def attempt(self, attempt_type):
 		attempt = {
 			'weburls': [*self.webportals[attempt_type]],
-			'getter': self.options_getters[attempt_type],
 			'type': attempt_type,
 		}
 		random.shuffle(attempt['weburls'])
@@ -77,13 +72,13 @@ class SkynetRemote(GitAnnexESRP):
 		weburl = attempt['weburls'].pop()
 		self.DEBUG('Trying webportal ' + weburl + ' for ' + task)
 		attempt['weburl'] = weburl
-		options = attempt['getter']()
-		options.portal_url = weburl
+		options = {}
+		options['portal_url'] = weburl
 		return options
 
 	# return True if responsible for downloading passed url
 	def claimsUrl(self, url):
-		return url[0:len(Skynet.uri_skynet_prefix())] == Skynet.uri_skynet_prefix()
+		return url[0:len('sia://')] == 'sia://'
 
 	def metadataGood(self, key, skylink, keysize):
 		try:
@@ -105,7 +100,7 @@ class SkynetRemote(GitAnnexESRP):
 	# return False or True if key is present
 	def isPresent(self, key):
 		keysize = self.GETSIZE(key)
-		for url in self.GETURLS(key, Skynet.uri_skynet_prefix()):
+		for url in self.GETURLS(key, 'sia://'):
 			if not self.metadataGood(key, url, keysize):
 				continue
 			return True
@@ -119,9 +114,9 @@ class SkynetRemote(GitAnnexESRP):
 		count = 0
 		while True:
 			options = self.attempt_options(attempt, key)
-			options.custom_filename = os.path.basename(filename)
-			options.portal_upload_path += '/' + ''.join(filter(lambda x: x.isalnum(), key + str(time.time())))
-			keysize = self.GETSIZE(options.custom_filename)
+			options['custom_filename'] = os.path.basename(filename)
+			options['endpoint_path'] = '/' + ''.join(filter(lambda x: x.isalnum(), key + str(time.time())))
+			keysize = self.GETSIZE(options['custom_filename'])
 			try:
 				self.DEBUG('Trying to upload %s' % filename)
 				if keysize >= 256 * 1024:
@@ -137,15 +132,15 @@ class SkynetRemote(GitAnnexESRP):
 									break
 								progress = progress + len(data)
 								yield data
-						response = Skynet.upload_file_request_with_chunks(chunks(), options)
-						self.DEBUG('Last chunk accepted by ' + options.portal_url)
+						response = SkynetClient(options['portal_url']).upload_file_request_with_chunks(chunks(), options)
+						self.DEBUG('Last chunk accepted by ' + options['portal_url'])
 				else:
-					response = Skynet.upload_file_request(filename, options)
+					response = SkynetClient(options['portal_url']).upload_file_request(filename, options)
 				for line in response.text.split('\n'):
 					self.DEBUG(line)
 				response = response.json()
 				try:
-					skylink = Skynet.uri_skynet_prefix() + response['skylink']
+					skylink = 'sia://' + response['skylink']
 				except KeyError:
 					self.DEBUG(response['message']);
 					continue
@@ -157,7 +152,7 @@ class SkynetRemote(GitAnnexESRP):
 				for line in traceback.format_exc().split('\n'):
 					self.DEBUG(line)
 				continue
-			if not self.metadataGood(options.custom_filename, skylink, keysize):
+			if not self.metadataGood(options['custom_filename'], skylink, keysize):
 				self.DEBUG('Upload unsuccessful')
 				continue
 			break
@@ -166,10 +161,9 @@ class SkynetRemote(GitAnnexESRP):
 			self.SETURLPRESENT(key, url)
 
 	def skylink_to_urls(self, skylink):
-		if skylink.startswith(Skynet.uri_skynet_prefix()):
-			skylink = skylink[len(Skynet.uri_skynet_prefix()):]
+		if skylink.startswith('sia://'):
+			skylink = skylink[len('sia://'):]
 		
-		download_options = Skynet.default_download_options()
 		urls = [portal_url + '/' + skylink for portal_url in self.webportals['download']]
 		urls.extend([portal_url + '/' + skylink for portal_url in self.webportals['download_webonly']])
 		return urls
@@ -179,7 +173,7 @@ class SkynetRemote(GitAnnexESRP):
 		while True:
 			options = self.attempt_options(attempt, url, False)
 			try:
-				result = Skynet.metadata_request(url, options)
+				result = SkynetClient(options['portal_url']).get_metadata_request(url, options)
 				if result.status_code != 200:
 					continue
 				metadata = {
@@ -224,13 +218,13 @@ class SkynetRemote(GitAnnexESRP):
 	# retrieve key to file
 	def retrieve(self, key, filename):
 		keysize = self.GETSIZE(key)
-		for url in self.GETURLS(key, Skynet.uri_skynet_prefix()):
+		for url in self.GETURLS(key, 'sia://'):
 			try:
 				attempt = self.attempt('download')
 				while True:
 					options = self.attempt_options(attempt, url, False)
 					try:
-						result = Skynet.download_file_request(url, options, stream=True)
+						result = SkynetClient(options['portal_url']).download_file_request(url, options, stream=True)
 						if result.status_code == 200:
 							total_length = result.headers.get('Content-Length')
 							if keysize is not None and total_length is not None and keysize != int(total_length):
@@ -262,7 +256,7 @@ class SkynetRemote(GitAnnexESRP):
 	# remove a key's contents
 	def remove(self, key):
 		# not easy to delete from skynet atm, but making the file inaccessible lets fsck handle corrupt uploads as it expects
-		for skylink in self.GETURLS(key, Skynet.uri_skynet_prefix()):
+		for skylink in self.GETURLS(key, 'sia://'):
 			self.SETURIMISSING(key, skylink)
 			for url in self.skylink_to_urls(skylink):
 				self.SETURLMISSING(key, url)
