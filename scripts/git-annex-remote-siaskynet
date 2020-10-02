@@ -121,18 +121,26 @@ class SkynetRemote(GitAnnexESRP):
 				self.DEBUG('Trying to upload %s' % filename)
 				if keysize >= 256 * 1024:
 					with open(filename, 'rb') as file_object:
-						def chunks():
-							chunk_size = 128 * 1024
-							progress = 0
-							while True:
-								self.PROGRESS(progress)
-								data = file_object.read(chunk_size)
+						class chunks:
+							def __init__(self, annex, size, file_object, chunk_size = 128 * 1024):
+								self.annex = annex
+								self.size = size
+								self.file_object = file_object
+								self.chunk_size = chunk_size
+								self.progress = 0
+							def __len__(self):
+								return self.size
+							def __iter__(self):
+								return self
+							def __next__(self):
+								self.annex.PROGRESS(self.progress)
+								data = self.file_object.read(self.chunk_size)
 								if not data:
-									self.DEBUG('Finished sending, waiting for server.')
-									break
-								progress = progress + len(data)
-								yield data
-						response = SkynetClient(options['portal_url']).upload_file_request_with_chunks(chunks(), options)
+									self.annex.DEBUG('Finished sending, waiting for server.')
+									raise StopIteration()
+								self.progress = self.progress + len(data)
+								return data
+						response = SkynetClient(options['portal_url']).upload_file_request_with_chunks(chunks(self, keysize, file_object), options)
 						self.DEBUG('Last chunk accepted by ' + options['portal_url'])
 				else:
 					response = SkynetClient(options['portal_url']).upload_file_request(filename, options)
