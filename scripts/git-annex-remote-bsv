@@ -161,24 +161,37 @@ class BSVRemote(SpecialRemote):
 					file.write(data)
 			return
 		raise RemoteError('not found')
-	def checkpresent(self, key):
+	def _checkpresent(self, key, removemissing = False):
+		result = False
 		for url in self.annex.geturls(key, 'B://'):
 			txid = url[4:]
 			if self.waitForConfirmations([txid]):
-				return True
+				result = True
+				if not removemissing:
+					break
+			elif removemissing:
+				self.annex.seturlmissing(key, url)
 		for url in self.annex.geturls(key, 'BCAT://'):
 			txid = url[7:]
 			txids = [txid]
 			fields = self.downloader.bcat_linker_fields_from_txid(txid)
 			if not fields:
+				if removemissing:
+					self.annex.seturlmissing(key, url)
 				continue
 			txids.extend(fields['parts'])
 			if self.waitForConfirmations(txids):
-				return True
-		return False
+				result = True
+				if not removemissing:
+					break
+			elif removemissing:
+				self.annex.seturlmissing(key, url)
+		return result
+	def checkpresent(self, key):
+		return self._checkpresent(key, False)
 	def remove(self, key):
 		# remove key, return silently if not exist
-		if self.checkpresent(key):
+		if self._checkpresent(key, true): # keys that failed broadcasting are removed
 			raise RemoteError('bsv content is immutable')
 	def claimurl(self, url):
 		return url[0:7] == 'BCAT://' or url[0:4] == 'B://'
