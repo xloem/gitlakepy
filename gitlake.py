@@ -17,7 +17,8 @@ class GitAnnexESRP(threading.Thread):
     VERY_EXPENSIVE = 1000
     ADD_ENCRYPTED = 50
 
-  def __init__(self):
+  def __init__(self, mockinput = None):
+    self.stdin = mockinput if mockinput else sys.stdin
     try:
       threading.Thread.__init__(self)
       self.send_lock = threading.RLock()
@@ -83,7 +84,7 @@ class GitAnnexESRP(threading.Thread):
     reply = None
     while True:
       try:
-        line = sys.stdin.readline()
+        line = self.stdin.readline()
         if line == "":
           break
         # funny tricks here make sure args = None if no args are provided

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import collections
+import io
 import os
 import random
 import sys
@@ -10,7 +11,8 @@ import traceback
 from gitlake import GitAnnexESRP
 
 try:
-	from siaskynet import SkynetClient
+	import siaskynet
+	from siaskynet import SkynetClient, _upload
 	import json
 except:
 	GitAnnexESRP().ERROR("** Sia Skynet python3 module 'siaskynet' not installed.")
@@ -22,7 +24,7 @@ progname = argv[0]
 
 
 class SkynetRemote(GitAnnexESRP):
-	def __init__(self):
+	def __init__(self, mockinput = None):
 		self.webportals = {
 			'disabled': [
 				"https://skyportal.xyz", # downloads timing out 2020-09-22
@@ -52,7 +54,7 @@ class SkynetRemote(GitAnnexESRP):
 				#"https://skynet.tutemwesi.com", # 'unable to upload large skyfile', 128MiB: 2020-07-24; 502 bad gateway instead of skylink 3.1G 2020-09-28
 			]
 		}
-		GitAnnexESRP.__init__(self)
+		GitAnnexESRP.__init__(self, mockinput)
 
 	def attempt(self, attempt_type):
 		attempt = {
@@ -115,32 +117,30 @@ class SkynetRemote(GitAnnexESRP):
 		while True:
 			options = self.attempt_options(attempt, key)
 			options['custom_filename'] = os.path.basename(filename)
-			options['endpoint_path'] = '/' + ''.join(filter(lambda x: x.isalnum(), key + str(time.time())))
-			keysize = self.GETSIZE(options['custom_filename'])
+			options['timeout_seconds'] = 10
+			options['endpoint_path'] = '/skynet/skyfile/' + ''.join(filter(lambda x: x.isalnum(), key + str(time.time())))
+			keysize = self.GETSIZE(key)
 			try:
 				self.DEBUG('Trying to upload %s' % filename)
 				if keysize >= 256 * 1024:
-					with open(filename, 'rb') as file_object:
-						class chunks:
-							def __init__(self, annex, size, file_object, chunk_size = 128 * 1024):
-								self.annex = annex
-								self.size = size
-								self.file_object = file_object
-								self.chunk_size = chunk_size
-								self.progress = 0
-							def __len__(self):
-								return self.size
-							def __iter__(self):
-								return self
-							def __next__(self):
-								self.annex.PROGRESS(self.progress)
-								data = self.file_object.read(self.chunk_size)
-								if not data:
-									self.annex.DEBUG('Finished sending, waiting for server.')
-									raise StopIteration()
-								self.progress = self.progress + len(data)
-								return data
-						response = SkynetClient(options['portal_url']).upload_file_request_with_chunks(chunks(self, keysize, file_object), options)
+					def upload_file_request_with_chunks(client, data, options):
+						# until we (or somebody) finish https://github.com/NebulousLabs/python-skynet/pull/36
+						opts = _upload.default_upload_options()
+						opts.update(client.custom_opts)
+						opts.update(options)
+						filename = options['custom_filename']
+						params = {'filename': filename}
+						headers = {'Content-Type': 'application/octet-stream'}
+						return client.execute_request('POST',opts,data=data,headers=headers,params=params)
+					class progressreader(io.BufferedReader):
+						def __init__(self, filename, progress):
+							super().__init__(io.FileIO(filename, 'rb'))
+							self.progress = progress
+						def read(self, size = None):
+							self.progress(self.tell())
+							return super().read(size)
+					with progressreader(filename, lambda bytes: self.PROGRESS(bytes)) as data:
+						response = upload_file_request_with_chunks(SkynetClient(options['portal_url']), data, options)#.upload_file_request_with_chunks(options['custom_filename'], data, options)
 						self.DEBUG('Last chunk accepted by ' + options['portal_url'])
 				else:
 					response = SkynetClient(options['portal_url']).upload_file_request(filename, options)
@@ -269,4 +269,5 @@ class SkynetRemote(GitAnnexESRP):
 			for url in self.skylink_to_urls(skylink):
 				self.SETURLMISSING(key, url)
 
-SkynetRemote()
+if __name__ == '__main__':
+	SkynetRemote()
