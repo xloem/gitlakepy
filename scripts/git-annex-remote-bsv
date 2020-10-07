@@ -51,18 +51,27 @@ class BSVRemote(SpecialRemote):
 		self.annex.info('Connecting to API server')
 		self.uploader = Upload(self.annex.getconfig('key'), network=self.annex.getconfig('network'), utxo_min_confirmations=0, fee=float(self.annex.getconfig('fee')))
 		self.downloader = Download(network=self.annex.getconfig('network'))
-		self.annex.info('Address: ' + self.uploader.address + ' Balance: ' + self.uploader.get_balance() + ' sat')
+		self.annex.info('Address: ' + self.uploader.address + ' Balance: ' + self.retry_net(self.uploader.get_balance) + ' sat')
 		self.annex.info('Network: ' + self.annex.getconfig('network') + ' Fee: ' + self.annex.getconfig('fee') + ' Confs: ' + self.annex.getconfig('confirmations'))
 		self.lockfilename = self.annex.getgitdir() + '/' + self.annex.getuuid() + '.lock'
 		self.lockfile = open(self.lockfilename, 'w')
 	def transfer_store(self, key, filename):
-		self.annex.info('TRANSFER STORE ' + key + ' ' + filename)
 		try:
 			return self._transfer_store(key, filename)
 		except ConnectionError as e:
 			raise RemoteError(' '.join(e.args).replace('\n','  '))
 		except HTTPError as e:
 			raise RemoteError(' '.join([e.request.url,str(e.request.headers),*e.args,e.response.text]).replace('\n','  '))
+	def retry_net(self, netfunc, *args):
+		while True:
+			try:
+				return netfunc(*args)
+			except ConnectionError as e:
+				self.annex.info(' '.join(e.args).replace('\n','  '))
+			except HTTPError as e:
+				self.annex.info(' '.join([e.request.url,str(e.request.headers),*e.args,e.response.text]).replace('\n','  '))
+			self.annex.info('Waiting 2 minutes...')
+			sleep(60 * 2)
 	def _transfer_store(self, key, filename):
 		neededconfs = int(self.annex.getconfig('confirmations'))
 		fee = float(self.annex.getconfig('fee'))
@@ -72,7 +81,7 @@ class BSVRemote(SpecialRemote):
 		self.annex.info('Locking ' + self.lockfilename + ' for ' + key)
 		with Flock(self.lockfile, LOCK_EX):
 			self.annex.info('Locked ' + self.lockfilename + ' for ' + key)
-			balance = int(self.uploader.get_balance())
+			balance = int(self.retry_net(self.uploader.get_balance))
 			if balance < cost:
 				needed = cost - balance
 				self.annex.info('Insufficient balance')
@@ -91,18 +100,28 @@ class BSVRemote(SpecialRemote):
 	
 				txs = {}
 	
-				utxos_available = self.uploader.get_unspents()
-				utxos_to_split = []
-				sum = 0
-				for utxo in utxos_available:
-					utxos_to_split.append(utxo)
-					sum += utxo.amount
-					if sum >= cost:
+				while True:
+					utxos_available = self.retry_net(self.uploader.get_unspents)
+					utxos_to_split = []
+					total = 0
+					for utxo in utxos_available:
+						utxos_to_split.append(utxo)
+						total += utxo.amount
+						if total >= cost:
+							break
+					split_outputs = self.uploader.get_split_outputs(utxos_to_split)
+					utxos_to_split, sanitized_split_outputs = sanitize_tx_data(utxos_to_split, split_outputs, fee, self.uploader.address, combine=True, message=None, compressed=self.uploader.is_compressed(), custom_pushdata=False)
+					split_outputs = sanitized_split_outputs[:len(split_outputs)] # remove change
+					txdata = create_p2pkh_transaction(self.uploader, utxos_to_split, split_outputs, False)
+					try:
+						txid = self.uploader.send_rawtx(txdata)
 						break
-				split_outputs = self.uploader.get_split_outputs(utxos_to_split)
-				utxos_to_split, split_outputs = sanitize_tx_data(utxos_to_split, split_outputs, fee, self.uploader.address, combine=True, message=None, compressed=self.uploader.is_compressed(), custom_pushdata=False)
-				txdata = create_p2pkh_transaction(self.uploader, utxos_to_split, split_outputs, False)
-				txid = self.uploader.send_rawtx(txdata)
+					except ConnectionError as e:
+						self.annex.info(' '.join(e.args).replace('\n','  '))
+					except HTTPError as e:
+						self.annex.info(' '.join([e.request.url,str(e.request.headers),*e.args,e.response.text]).replace('\n','  '))
+					self.annex.info('Waiting 2 minutes...')
+					sleep(60 * 2)
 				txs[txid] = txdata
 	
 				# make utxos from split_outputs
@@ -120,9 +139,9 @@ class BSVRemote(SpecialRemote):
 						if len(data) <= 0:
 							break
 						pushdata = op_return.create_pushdata([(BCATPART, 'utf-8'),(data.hex(), 'hex')])
-						utxo = utxos.pop()
-						txdata = self.uploader.create_transaction(outputs=[], message=pushdata, fee=fee, combine=False, custom_pushdata=True, unspents=[utxo])
-						txid = self.uploader.send_rawtx(txdata)
+						unspents = [utxos.pop()]
+						txdata = self.uploader.create_transaction(outputs=[], message=pushdata, fee=fee, combine=False, custom_pushdata=True, unspents=unspents)
+						txid = self.retry_net(self.uploader.send_rawtx, txdata)
 						progress += len(data)
 						txs[txid] = txdata
 						parts.append(txid)
@@ -130,7 +149,7 @@ class BSVRemote(SpecialRemote):
 					self.annex.info('WARNING: Failed reading file from disk.  May be only partially uploaded.  Continuing with upload so that link to partial data is saved at end.  Resume not implemented.')
 				
 				txdata = self.uploader.bcat_linker_create_from_txids(parts, media_type, encoding, file_name, info='git-annex-remote-bsv', flags=' ', utxos=utxos)
-				txid = self.uploader.send_rawtx(txdata)
+				txid = self.retry_net(self.uploader.send_rawtx, txdata)
 				txs[txid] = txdata
 				self.annex.progress(progress)
 				
@@ -144,7 +163,7 @@ class BSVRemote(SpecialRemote):
 					data = file.read()
 				txdata = self.uploader.b_create_rawtx_from_binary(data, media_type, encoding, file_name)
 				data = None
-				txid = self.uploader.send_rawtx(txdata)
+				txid = self.retry_net(self.uploader.send_rawtx, txdata)
 				self.annex.seturipresent(key, 'B://' + txid)
 				if size > 512:
 					self.annex.seturlpresent(key, 'https://x.bitfs.network/' + txid + '.out.0.3')
@@ -152,7 +171,7 @@ class BSVRemote(SpecialRemote):
 				url = 'B://' + txid
 			self.waitForConfirmations(0, txs.copy())
 			self.annex.seturlpresent(key, 'https://bico.media/' + txid)
-			self.annex.info('Remaining balance: ' + self.uploader.get_balance() + ' sat')
+			self.annex.info('Remaining balance: ' + self.retry_net(self.uploader.get_balance) + ' sat')
 		self.annex.info('Unlocked ' + self.lockfilename + ' for ' + key)
 		self.waitForConfirmations(neededconfs, txs)
 		self.annex.info('Uploaded to ' + url)
@@ -216,7 +235,7 @@ class BSVRemote(SpecialRemote):
 		self.annex.info('Checking for ' + str(neededconfs) + ' confirmation(s) of ' + str(len(txs)) +  ' transactions ... ')
 		txids = set(txs)
 		while True:
-			confirmations = zip(txids, self.uploader.confirmations(list(txids)))
+			confirmations = zip(txids, self.retry_net(self.uploader.confirmations, list(txids)))
 			confirmed = []
 			unconfirmed = []
 			missing = []
@@ -242,7 +261,12 @@ class BSVRemote(SpecialRemote):
 				if type(txs) is dict:
 					self.annex.info('Rebroadcasting ' + str(len(missing)) + ' transactions that are not on the network yet ...')
 					for txid in missing:
-						self.uploader.send_rawtx(txs[txid])
+						try:
+							self.uploader.send_rawtx(txs[txid])
+						except ConnectionError as e:
+							self.annex.info(' '.join(e.args).replace('\n','  '))
+						except HTTPError as e:
+							self.annex.info(' '.join([e.request.url,str(e.request.headers),*e.args,e.response.text]).replace('\n','  '))
 					continue
 				else:
 					self.annex.info(str(len(missing)) + ' transactions are not on the network.')
@@ -250,8 +274,8 @@ class BSVRemote(SpecialRemote):
 			elif 0 == len(unconfirmed):
 				break
 			self.annex.info(str(len(unconfirmed)) + ' transactions on network but unconfirmed ... confirmations range = [' + str(minconfs) + ',' + str(maxconfs) + '] txid = ' + unconfirmed[0][0])
-			self.annex.info('Waiting 10 minutes...')
-			sleep(60 * 10)
+			self.annex.info('Waiting 2 minutes...')
+			sleep(60 * 2)
 		return True
 			
 
