@@ -25,6 +25,8 @@ progname = argv[0]
 
 class SkynetRemote(GitAnnexESRP):
 	def __init__(self, mockinput = None):
+		# note: you can get an array of webportals from
+		#	requests.get('https://siastats.info/dbs/skynet_current.json').json()
 		self.webportals = {
 			'disabled': [
 				"https://skyportal.xyz", # downloads timing out 2020-09-22
@@ -80,7 +82,12 @@ class SkynetRemote(GitAnnexESRP):
 
 	# return True if responsible for downloading passed url
 	def claimsUrl(self, url):
-		return url[0:len('sia://')] == 'sia://'
+		if url[0:len('sia://')] == 'sia://':
+			return True
+		for portalurl in self.skylink_to_urls(''):
+			if url.startswith(portalurl):
+				return True
+		return False
 
 	def metadataGood(self, key, skylink, keysize):
 		try:
