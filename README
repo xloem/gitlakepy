@@ -2,8 +2,7 @@
 
 INSTALLATION
 
-sudo ./setup.py install
-
+$ pip3 install .
 
 SCRIPTS
 
