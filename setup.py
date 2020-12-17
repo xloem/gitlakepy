@@ -9,5 +9,5 @@ setup(name='gitlake',
       url='https://github.com/xloem/gitlakepy',
       py_modules=['gitlake'],
       scripts=['scripts/git-annex-remote-freenet','scripts/git-annex-remote-siaskynet','scripts/git-annex-remote-bsv'],
-      install_requires=['fcp', 'siaskynet', 'polyglot-bitcoin', 'annexremote', 'flock'],
+      install_requires=['fcp', 'siaskynet', 'polyglot-bitcoin', 'annexremote', 'flock', 'bitcoinx'],
      )

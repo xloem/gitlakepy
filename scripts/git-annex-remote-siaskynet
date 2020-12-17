@@ -32,17 +32,18 @@ class SkynetRemote(GitAnnexESRP):
 				"https://skyportal.xyz", # downloads timing out 2020-09-22
 			],
 			'download_webonly': [
-				"https://skynethub.io", # getting occasional corruption 2020-05; very slow to respond to metadata query 2020-08-02
 				"https://sialoop.net", # getting occasional corruption 2020-05; very slow to respond to metadata query 2020-08-02
 				"https://www.siacdn.com", # very slow to respond to metadata query 2020-08-02, 2020-09-27
+				"https://siasky.dev", # very slow to respond to metadata query 2020-08-02; working 2020-09-27; timing out 2020-12-17
 			],
 			'download': [
 				"https://skynet.luxor.tech",
 				"https://vault.lightspeedhosting.com",
-				"https://siasky.dev", # very slow to respond to metadata query 2020-08-02; working 2020-09-27
 				"https://siasky.net", # slow 2020-08-02 # speedy 2020-09-22
 				"https://skydrain.net", # very slow to respond to metadata query 2020-08-02
 				"https://skynet.tutemwesi.com", # very slow to respond 2020-05, 2020-08-2
+				"https://skynethub.io", # getting occasional corruption 2020-05; very slow to respond to metadata query 2020-08-02
+				"https://skyportal.xyz", # downloads timing out 2020-09-22
 			],
 			'upload': [
 				"https://siasky.net",  # '504 Gateway Time-out' instead of skylink, 128MiB: 2020-07-23, 2020-07-24
@@ -134,21 +135,44 @@ class SkynetRemote(GitAnnexESRP):
 						# until we (or somebody) finish https://github.com/NebulousLabs/python-skynet/pull/36
 						opts = _upload.default_upload_options()
 						opts.update(client.custom_opts)
-						opts.update(options)
-						filename = options['custom_filename']
+						if options is not None:
+							opts.update(options)
+						if opts['custom_filename']:
+							filename = opts['custom_filename']
+						else:
+							filename = str(data)
+
+						upload_data = {filename: data}
+
 						params = {'filename': filename}
 						headers = {'Content-Type': 'application/octet-stream'}
 						return client.execute_request('POST',opts,data=data,headers=headers,params=params)
 					class progressreader(io.BufferedReader):
-						def __init__(self, filename, progress):
+						def __init__(self2, filename, progress):
 							super().__init__(io.FileIO(filename, 'rb'))
-							self.progress = progress
-						def read(self, size = None):
-							self.progress(self.tell())
-							return super().read(size)
-					with progressreader(filename, lambda bytes: self.PROGRESS(bytes)) as data:
-						response = upload_file_request_with_chunks(SkynetClient(options['portal_url']), data, options)#.upload_file_request_with_chunks(options['custom_filename'], data, options)
-						self.DEBUG('Last chunk accepted by ' + options['portal_url'])
+							self2.progress = progress
+							self2.filename = filename
+						def read(self2, size = None):
+							self2.progress(self2.tell())
+							data = super().read(size)
+							self.DEBUG(len(data))
+							return data;
+						def __str__(self2):
+							return self2.filename
+					def progressgenerator(filename, progress):
+						self.DEBUG('generating started!')
+						with open(filename, 'rb') as file:
+							while True:
+								progress(file.tell())
+								data = file.read(8192)
+								if len(data) == 0:
+									break
+								yield data
+					response = SkynetClient(options['portal_url']).upload_file_request_with_chunks(progressgenerator(filename, self.PROGRESS), options)
+					#with progressreader(filename, self.PROGRESS) as data:
+					#	response = SkynetClient(options['portal_url']).upload_file_request_with_chunks(data, options)
+						#response = upload_file_request_with_chunks(SkynetClient(options['portal_url']), data, options)
+					self.DEBUG('Last chunk accepted by ' + options['portal_url'])
 				else:
 					response = SkynetClient(options['portal_url']).upload_file_request(filename, options)
 				for line in response.text.split('\n'):

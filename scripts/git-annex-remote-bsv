@@ -169,6 +169,10 @@ class BSVRemote(SpecialRemote):
 					self.annex.seturlpresent(key, 'https://x.bitfs.network/' + txid + '.out.0.3')
 				txs = {txid:txdata}
 				url = 'B://' + txid
+			#global_spent = self.annex.getstate('spentutxos').split('\n')
+			#global_spent.extend(.... uh ...)
+			#global_spent.sort()
+			#self.annex.setstate('spentutxos', '\n'.join(global_spent))
 			self.waitForConfirmations(0, txs.copy())
 			self.annex.seturlpresent(key, 'https://bico.media/' + txid)
 			self.annex.info('Remaining balance: ' + self.retry_net(self.uploader.get_balance) + ' sat')
@@ -235,13 +239,13 @@ class BSVRemote(SpecialRemote):
 		self.annex.info('Checking for ' + str(neededconfs) + ' confirmation(s) of ' + str(len(txs)) +  ' transactions ... ')
 		txids = set(txs)
 		while True:
-			confirmations = zip(txids, self.retry_net(self.uploader.confirmations, list(txids)))
 			confirmed = []
 			unconfirmed = []
 			missing = []
 			minconfs = neededconfs
 			maxconfs = 0
-			for txid, count in confirmations:
+			for txid in txids:
+				count = self.retry_net(self.uploader.network_api.get_transaction, txid).confirmations
 				if count is None:
 					missing.append(txid)
 					minconfs = 0
