@@ -32,9 +32,9 @@ class SkynetRemote(GitAnnexESRP):
 				"https://skyportal.xyz", # downloads timing out 2020-09-22
 			],
 			'download_webonly': [
-				"https://sialoop.net", # getting occasional corruption 2020-05; very slow to respond to metadata query 2020-08-02
 				"https://www.siacdn.com", # very slow to respond to metadata query 2020-08-02, 2020-09-27
 				"https://siasky.dev", # very slow to respond to metadata query 2020-08-02; working 2020-09-27; timing out 2020-12-17
+				"https://skynethub.io", # getting occasional corruption 2020-05; very slow to respond to metadata query 2020-08-02; timing out 2021-02-25
 			],
 			'download': [
 				"https://skynet.luxor.tech",
@@ -42,8 +42,8 @@ class SkynetRemote(GitAnnexESRP):
 				"https://siasky.net", # slow 2020-08-02 # speedy 2020-09-22
 				"http://skydrain.net", # very slow to respond to metadata query 2020-08-02
 				"https://skynet.tutemwesi.com", # very slow to respond 2020-05, 2020-08-2
-				"https://skynethub.io", # getting occasional corruption 2020-05; very slow to respond to metadata query 2020-08-02
 				"https://skyportal.xyz", # downloads timing out 2020-09-22
+				"https://sialoop.net", # getting occasional corruption 2020-05; very slow to respond to metadata query 2020-08-02
 			],
 			'upload': [
 				"https://siasky.net",  # '504 Gateway Time-out' instead of skylink, 128MiB: 2020-07-23, 2020-07-24
