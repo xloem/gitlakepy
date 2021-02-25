@@ -37,7 +37,7 @@ class SkynetRemote(GitAnnexESRP):
 				"https://skynethub.io", # getting occasional corruption 2020-05; very slow to respond to metadata query 2020-08-02; timing out 2021-02-25
 			],
 			'download': [
-                "https://skynet.developmomentum.com",
+				"https://skynet.developmomentum.com",
 				"https://skynet.luxor.tech",
 				"https://vault.lightspeedhosting.com",
 				"https://siasky.net", # slow 2020-08-02 # speedy 2020-09-22
@@ -47,7 +47,7 @@ class SkynetRemote(GitAnnexESRP):
 				"https://sialoop.net", # getting occasional corruption 2020-05; very slow to respond to metadata query 2020-08-02
 			],
 			'upload': [
-                "https://skynet.developmomentum.com",
+				"https://skynet.developmomentum.com",
 				"https://siasky.net",  # '504 Gateway Time-out' instead of skylink, 128MiB: 2020-07-23, 2020-07-24
 				"https://siasky.dev",
 				"https://skyportal.xyz", # good 2020-09-27
@@ -59,6 +59,8 @@ class SkynetRemote(GitAnnexESRP):
 				#"https://skynet.tutemwesi.com", # 'unable to upload large skyfile', 128MiB: 2020-07-24; 502 bad gateway instead of skylink 3.1G 2020-09-28
 			]
 		}
+		self.timeout = 10
+		self.redundancy = 2
 		GitAnnexESRP.__init__(self, mockinput)
 
 	def attempt(self, attempt_type):
@@ -81,7 +83,7 @@ class SkynetRemote(GitAnnexESRP):
 		attempt['weburl'] = weburl
 		options = {}
 		options['portal_url'] = weburl
-		options['timeout_seconds'] = 10
+		options['timeout_seconds'] = self.timeout
 		return options
 
 	# return True if responsible for downloading passed url
@@ -165,7 +167,7 @@ class SkynetRemote(GitAnnexESRP):
 						self.DEBUG('generating started!')
 						with open(filename, 'rb') as file:
 							while True:
-								progress(file.tell())
+								progress(file.tell() // self.redundancy)
 								data = file.read(8192)
 								if len(data) == 0:
 									break
@@ -186,7 +188,7 @@ class SkynetRemote(GitAnnexESRP):
 					self.DEBUG(response['message']);
 					continue
 				count = count + 1
-				if count > 1:
+				if count >= self.redundancy:
 					break
 			except Exception as exception:
 				self.DEBUG(attempt['weburl'] + ': ')
