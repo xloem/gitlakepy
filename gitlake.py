@@ -7,6 +7,8 @@ import sys
 import threading
 import traceback
 
+import hashlib
+
 class GitAnnexESRP(threading.Thread):
 
   class Cost:
@@ -310,7 +312,7 @@ class GitAnnexESRP(threading.Thread):
   def onTRANSFER(self, type, key, file):
     try:
       if type == "STORE":
-        self.store(key, file)
+        self._store_deduplicate(key, file)
       elif type == "RETRIEVE":
         self.retrieve(key, file)
       else:
@@ -319,6 +321,32 @@ class GitAnnexESRP(threading.Thread):
       self.exception(False)
       return self.send('TRANSFER-FAILURE', type, key, e.message)
     return self.send('TRANSFER-SUCCESS', type, key)
+
+  def _store_deduplicate(self, key, file):
+    if key.find('-s') != -1 and key.find('-S') != -1:
+      # file is a chunk: deduplicate
+      backend, hashobj = 'BLAKE2B512', hashlib.blake2b(digest_size=512//8)
+      with open(file, 'rb') as f:
+        for chunk in iter(lambda: f.read(1024*1024), b''):
+                hashobj.update(chunk)
+      subkey = '{}-s{}--{}'.format(backend, self.GETSIZE(key), hashobj.hexdigest())
+      if self.isPresent(subkey):
+        for url in self.GETURLS(subkey):
+          if self.claimsUrl(url):
+            if url.startswith('http') or url.startswith('ftp'):
+              self.SETURLPRESENT(key, url)
+            else:
+              self.SETURIPRESENT(key, url)
+        return
+      self.store(key, file)
+      for url in self.GETURLS(key):
+        if self.claimsUrl(url):
+          if url.startswith('http') or url.startswith('ftp'):
+            self.SETURLPRESENT(subkey, url)
+          else:
+            self.SETURIPRESENT(subkey, url)
+    else:
+      self.store(key, file)
 
   # request to check if key is present
   # reply CHECKPRESENT-SUCCESS <key>, CHECKPRESENT-FAILURE <key>,
