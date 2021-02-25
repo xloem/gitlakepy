@@ -40,7 +40,7 @@ class SkynetRemote(GitAnnexESRP):
 				"https://skynet.luxor.tech",
 				"https://vault.lightspeedhosting.com",
 				"https://siasky.net", # slow 2020-08-02 # speedy 2020-09-22
-				"https://skydrain.net", # very slow to respond to metadata query 2020-08-02
+				"http://skydrain.net", # very slow to respond to metadata query 2020-08-02
 				"https://skynet.tutemwesi.com", # very slow to respond 2020-05, 2020-08-2
 				"https://skynethub.io", # getting occasional corruption 2020-05; very slow to respond to metadata query 2020-08-02
 				"https://skyportal.xyz", # downloads timing out 2020-09-22
@@ -79,6 +79,7 @@ class SkynetRemote(GitAnnexESRP):
 		attempt['weburl'] = weburl
 		options = {}
 		options['portal_url'] = weburl
+		options['timeout_seconds'] = 10
 		return options
 
 	# return True if responsible for downloading passed url
@@ -125,7 +126,6 @@ class SkynetRemote(GitAnnexESRP):
 		while True:
 			options = self.attempt_options(attempt, key)
 			options['custom_filename'] = os.path.basename(filename)
-			options['timeout_seconds'] = 10
 			options['endpoint_path'] = '/skynet/skyfile/' + ''.join(filter(lambda x: x.isalnum(), key + str(time.time())))
 			keysize = self.GETSIZE(key)
 			try:
