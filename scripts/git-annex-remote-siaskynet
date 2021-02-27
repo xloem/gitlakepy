@@ -169,10 +169,10 @@ class SkynetRemote(GitAnnexESRP):
 						with open(filename, 'rb') as file:
 							while True:
 								nonlocal total_bytes
-								progress(file.tell() // self.redundancy + total_bytes)
+								progress(total_bytes // self.redundancy)
 								data = file.read(8192)
+								total_bytes += len(data)
 								if len(data) == 0:
-									total_bytes += file.tell()
 									break
 								yield data
 					response = SkynetClient(options['portal_url']).upload_file_request_with_chunks(progressgenerator(filename, self.PROGRESS), options)
