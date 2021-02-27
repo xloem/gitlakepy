@@ -163,13 +163,16 @@ class SkynetRemote(GitAnnexESRP):
 							return data;
 						def __str__(self2):
 							return self2.filename
+					total_bytes = 0
 					def progressgenerator(filename, progress):
 						self.DEBUG('generating started!')
 						with open(filename, 'rb') as file:
 							while True:
-								progress(file.tell() // self.redundancy)
+								nonlocal total_bytes
+								progress(file.tell() // self.redundancy + total_bytes)
 								data = file.read(8192)
 								if len(data) == 0:
+									total_bytes += file.tell()
 									break
 								yield data
 					response = SkynetClient(options['portal_url']).upload_file_request_with_chunks(progressgenerator(filename, self.PROGRESS), options)
