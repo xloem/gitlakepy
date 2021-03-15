@@ -79,6 +79,7 @@ class SkynetRemote(GitAnnexESRP):
 			else:
 				raise Exception('tried all portals')
 		weburl = attempt['weburls'].pop()
+		sys.stderr.write('Trying webportal {} for {}'.format(weburl, task))
 		self.DEBUG('Trying webportal ' + weburl + ' for ' + task)
 		attempt['weburl'] = weburl
 		options = {}
@@ -168,11 +169,12 @@ class SkynetRemote(GitAnnexESRP):
 						self.DEBUG('generating started!')
 						with open(filename, 'rb') as file:
 							while True:
-								nonlocal total_bytes
+								nonlocal total_bytes, options
 								progress(total_bytes // self.redundancy)
 								data = file.read(8192)
 								total_bytes += len(data)
 								if len(data) == 0:
+									self.DEBUG('Finished sending {} bytes to {}'.format(total_bytes, options['portal_url']))
 									break
 								yield data
 					response = SkynetClient(options['portal_url']).upload_file_request_with_chunks(progressgenerator(filename, self.PROGRESS), options)
