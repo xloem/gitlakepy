@@ -27,6 +27,7 @@ class GitAnnexESRP(threading.Thread):
       self.replies_queue = Queue.Queue()
       self.handling_queue = Queue.Queue()
       self.incomingError = None
+      self.extensions = set()
       self.start()
       self.VERSION(1)
       while self.is_alive() or not self.handling_queue.empty():
@@ -252,6 +253,13 @@ class GitAnnexESRP(threading.Thread):
   def DEBUG(self, message):
     self.send('DEBUG', message)
 
+  # output <message>
+  def INFO(self, message):
+    if 'INFO' in self.extensions:
+        self.send('INFO', message)
+    else:
+        self.DEBUG(message)
+
   # end connection with failure
   def ERROR(self, message):
     self.send('ERROR', message)
@@ -306,6 +314,10 @@ class GitAnnexESRP(threading.Thread):
       self.exception(False)
       return self.send('PREPARE-FAILURE', e.message)
     return self.send('PREPARE-SUCCESS')
+
+  def onEXTENSIONS(self, *extensions):
+    self.extensions = set(extensions) & set(('INFO',))
+    return self.send('EXTENSIONS', *self.extensions)
 
   # store/retrieve a key, commands may be sent during transfer
   # reply with TRANSFER-SUCCESS|FAILURE STORE|RETRIEVE <key> [message]
