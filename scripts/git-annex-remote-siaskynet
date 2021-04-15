@@ -223,6 +223,7 @@ class SkynetRemote(GitAnnexESRP):
 			try:
 				result = SkynetClient(options['portal_url']).get_metadata_request(url, options)
 				if result.status_code != 200:
+					result = None
 					continue
 				metadata = {
 					"Content-Type": result.headers["Content-Type"]
@@ -236,6 +237,8 @@ class SkynetRemote(GitAnnexESRP):
 				break
 			except Exception as exception:
 				self.DEBUG(attempt['weburl'] + ': ' + repr(exception))
+		if result is None:
+			raise Exception("tried all portals")
 		self.DEBUG("metadata: " + str(metadata))
 		if "Skynet-File-Metadata" in metadata and "filename" in metadata["Skynet-File-Metadata"]:
 			filename = metadata["Skynet-File-Metadata"]["filename"]
