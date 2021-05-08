@@ -234,12 +234,12 @@ class SkynetRemote(GitAnnexESRP):
 					metadata["Content-Disposition"] = result.headers["Content-Disposition"]
 				if "Skynet-File-Metadata" in result.headers:
 					metadata["Skynet-File-Metadata"] = json.loads(result.headers["Skynet-File-Metadata"])
+				self.DEBUG(repr(result) + " metadata: " + str(metadata))
 				break
 			except Exception as exception:
 				self.DEBUG(attempt['weburl'] + ': ' + repr(exception))
 		if result is None:
 			raise Exception("tried all portals")
-		self.DEBUG("metadata: " + str(metadata))
 		if "Skynet-File-Metadata" in metadata and "filename" in metadata["Skynet-File-Metadata"]:
 			filename = metadata["Skynet-File-Metadata"]["filename"]
 		elif "filename" in metadata:
@@ -302,6 +302,7 @@ class SkynetRemote(GitAnnexESRP):
 			except Exception as exception:
 				self.DEBUG(repr(exception))
 				continue
+		self.remove(key)
 		raise Exception("tried all portals; are you online?");
 
 	# remove a key's contents
