@@ -46,7 +46,8 @@ class GitAnnexESRP(threading.Thread):
             handler(*(args.split(' ', nArgs)))
           else:
             handler()
-        except (AttributeError, NotImplementedError):
+        except (AttributeError, NotImplementedError) as e:
+          self.DEBUG('processing error ' + str(type(e)) + ' as unsupported request: ' + str(e))
           self.UNSUPPORTED_REQUEST()
     except Exception:
       self.exception()
@@ -301,7 +302,7 @@ class GitAnnexESRP(threading.Thread):
       self.initRemote()
     except Exception as e:
       self.exception(False)
-      return self.send('INITREMOTE-FAILURE', e.message)
+      return self.send('INITREMOTE-FAILURE', *(str(arg) for arg in e.args))
     return self.send('INITREMOTE-SUCCESS')
 
   # special remote shall boot up, may now send commands
@@ -312,7 +313,7 @@ class GitAnnexESRP(threading.Thread):
       self.prepare()
     except Exception as e:
       self.exception(False)
-      return self.send('PREPARE-FAILURE', e.message)
+      return self.send('PREPARE-FAILURE', *(str(arg) for arg in e.args))
     return self.send('PREPARE-SUCCESS')
 
   def onEXTENSIONS(self, *extensions):
@@ -328,10 +329,11 @@ class GitAnnexESRP(threading.Thread):
       elif type == "RETRIEVE":
         self.retrieve(key, file)
       else:
+        self.DEBUG('not STORE nor RETRIEVE')
         return self.UNSUPPORTED_REQUEST()
     except Exception as e:
       self.exception(False)
-      return self.send('TRANSFER-FAILURE', type, key, e.message)
+      return self.send('TRANSFER-FAILURE', type, key, *(str(arg) for arg in e.args))
     return self.send('TRANSFER-SUCCESS', type, key)
 
   def _store_deduplicate(self, key, file):
@@ -371,7 +373,7 @@ class GitAnnexESRP(threading.Thread):
         return self.send('CHECKPRESENT-FAILURE', key)
     except Exception as e:
       self.exception(False)
-      return self.send('CHECKPRESENT-UNKNOWN', key, e.message)
+      return self.send('CHECKPRESENT-UNKNOWN', key, *(str(arg) for arg in e.args))
 
   # request to remove a key's contents
   # reply REMOVE-SUCCESS <key> or REMOVE-FAILURE <key> <message>
@@ -380,7 +382,7 @@ class GitAnnexESRP(threading.Thread):
       self.remove(key)
     except Exception as e:
       self.exception(False)
-      return self.send('REMOVE-FAILURE', key, e.message)
+      return self.send('REMOVE-FAILURE', key, *(str(arg) for arg in e.args))
     return self.send('REMOVE-SUCCESS', key)
 
   #  -- end of required responses
