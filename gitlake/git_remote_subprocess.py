@@ -3,22 +3,24 @@ import configparser, hashlib, re, sys
 
 
 class GitRemoteSubprocess:
-    '''A git-remotehelpers remote that uses a shadow directory and launches git-receive-pack and git-upload-pack subprocesses.'''
-    def __init__(self, argv = [], protocols = ['http://', 'https://'], remote_name = None, url = None, pushurl = None):
-        if len(argv) > 3:
-            remote_name = argv[2]
-            url = argv[3]
-        elif len(argv) > 2:
-            url = argv[2]
+    '''A gitremote-helpers remote that uses a shadow directory and launches git-receive-pack and git-upload-pack subprocesses.'''
+    def __init__(self, git_dir = '.', url = None, remote_name = None, protocol = None):
         self.orig_url = url
-        for protocol in protocols:
-            url = url.replace(protocol, '')
+        proto_mkpt = url.find('://')
+        if proto_mkpt != -1:
+            self.protocol = url[:proto_mkpt]
+            url = url[proto_mkpt + len('://'):]
+        else:
+            self.protocol = protocol
         url = re.sub('/+', '/', url + '/')
         self.fetch_url, self.push_url = self.url2fetchpush(url)
         self.remote_name = remote_name
-        self.local = repo
-        shadow_gitdir = os.path.join(self.outer_repo.git_dir, 'gitlake', self.id())
-        self.remote_shadow = git.Repo.init(shadow_gitdir, mkdir = True)
+        self.local = self.path2repo(environ['GIT_DIR'])
+        self.shadow_gitdir = os.path.join(self.outer_repo.git_dir, 'gitlake', self.id())
+        try:
+            self.remote_shadow = git.Repo(self.shadow_gitdir)
+        except:
+            self.remote_shadow = None
 
         if remote_name is not None:
             if self.push_url is not None:
@@ -27,15 +29,46 @@ class GitRemoteSubprocess:
                         cfg['pushurl'] = self.push_url
                         cfg['url'] = self.fetch_url
 
+    @classmethod
+    def launch(cls):
+        if len(sys.argv) > 3:
+            remote_name = sys.argv[2]
+            url = sys.argv[3]
+        elif len(argv) > 2:
+            remote_name = None
+            url = sys.argv[2]
+        if sys.argv[0].startswith('git-remote-'):
+            protocol = sys.argv[0][len('git-remote-'):]
+        else:
+            protocol = None
+        git_dir = os.environ['GIT_DIR']
+        remote = cls(git_dir=git_dir, url=url, remote_name=remote_name, protocol=protocol)
+        remote.run()
+
     def run(self):
-        ''' process git-remotehelpers commands on stdin'''
+        ''' process gitremote-helpers commands on stdin'''
         while True:
             line = sys.stdin.readline().rstrip()
             if line == 'capabilities':
                 sys.stdout.write('connect\n\n')
-            elif line == 'connect git-upload-pack':
-                # fetch
+            elif line[:8] == 'connect ':
+                service = line[8:]
+                if service == 'git-upload-pack':
+                    self.download()
+                elif service == 'git-receive-pack':
+                    try:
+                        self.download()
+                        if self.remote_shadow is None:
+                            self.remote_shadow = git.Repo(shadow_gitdir, mkdir = True)
+                    except:
+                        if self.remote_shadow is None:
+                            self.remote_shadow = git.Repo.init(shadow_gitdir, mkdir = True, bare = True)
+                        # init if not exist
+                        ...
+                    self.upload()
+                self.download()
             elif line == 'connect git-receive-pack':
+                self.download()
                 # push
 
     def id(self):
@@ -47,7 +80,7 @@ class GitRemoteSubprocess:
 
     @classmethod
     def run(cls, argv):
-        '''Launch as a git-remotehelpers remote.'''
+        '''Launch as a gitremote-helpers remote.'''
         if len(argv) > 3:
             remotename = argv[2]
             origurl = argv[3]
