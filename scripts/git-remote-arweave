@@ -5,7 +5,7 @@ import requests
 
 GRAPHQL_URI='https://arweave.net/graphql'
 
-def find_updates(uri, Type, cursor=''):
+def get_page(uri, Type, cursor=''):
 	resp = requests.post(uri,
 		json={'query':'''
 			query {
@@ -41,7 +41,7 @@ def find_updates(uri, Type, cursor=''):
 		cursor = edges[-1]['cursor']
 	objects = [
 		dict(
-            txid = node['id'],
+			txid = node['id'],
 			owner = node['owner']['address'],
 			tags = {tag['name']: tag['value'] for tag in node['tags']}
 		)
@@ -49,13 +49,17 @@ def find_updates(uri, Type, cursor=''):
 	]
 	return objects, cursor
 
-cursor = None
-while True:
-	objs, cursor = find_updates(GRAPHQL_URI, 'update-ref', cursor)
-	if not len(objs):
-		break
-	for obj in objs:
-		print(obj)
+def yield_all(uri, Type):
+	cursor = None
+	while True:
+		objs, cursor = get_page(uri, Type, cursor = cursor)
+		if not len(objs):
+			break
+		yield from objs
+
+
+for obj in yield_all(GRAPHQL_URI, 'update-ref'):
+	print(obj)
 
 raise Exception('===> This is just a prototype to show git updates from arweave. <===')
 
