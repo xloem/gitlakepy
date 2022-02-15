@@ -17,6 +17,7 @@ def find_updates(uri, Type, cursor=''):
 				) {
 					edges {
 						node {
+							id
 							owner {
 								address
 							}
@@ -40,6 +41,7 @@ def find_updates(uri, Type, cursor=''):
 		cursor = edges[-1]['cursor']
 	objects = [
 		dict(
+            txid = node['id'],
 			owner = node['owner']['address'],
 			tags = {tag['name']: tag['value'] for tag in node['tags']}
 		)
