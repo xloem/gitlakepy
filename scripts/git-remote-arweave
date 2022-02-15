@@ -1,0 +1,59 @@
+#!/usr/bin/env python3
+
+import json
+import requests
+
+GRAPHQL_URI='https://arweave.net/graphql'
+
+def find_updates(uri, Type, cursor=''):
+    resp = requests.post(uri,
+    	json={'query':'''
+    		query {
+    			transactions(
+    				tags: [
+    					{ name: "Type", values: [''' + json.dumps(Type) + '''] }
+    				]
+                    after: ''' + json.dumps(cursor) + '''
+    			) {
+    				edges {
+    					node {
+    						owner {
+    							address
+    						}
+                            tags {
+                                name
+                                value
+                            }
+    					}
+                        cursor
+    				}
+    			}
+            }
+    	'''}
+    )
+    cursor = None
+    data = resp.json()
+    if 'data' not in data:
+        raise Exception(data)
+    edges = data['data']['transactions']['edges']
+    if len(edges):
+        cursor = edges[-1]['cursor']
+    objects = [
+        dict(
+            owner = node['owner']['address'],
+            tags = {tag['name']: tag['value'] for tag in node['tags']}
+        )
+        for node in (edge['node'] for edge in edges)
+    ]
+    return objects, cursor
+
+cursor = None
+while True:
+    objs, cursor = find_updates(GRAPHQL_URI, 'update-ref', cursor)
+    if not len(objs):
+        break
+    for obj in objs:
+        print(obj)
+
+raise Exception('===> This is just a prototype to show git updates from arweave. <===')
+
