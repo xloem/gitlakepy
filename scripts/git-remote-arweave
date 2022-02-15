@@ -3,62 +3,60 @@
 import json
 import requests
 
-GRAPHQL_URI='https://arweave.net/graphql'
-
-def get_page(uri, Type, cursor=''):
-	resp = requests.post(uri,
-		json={'query':'''
-			query {
-				transactions(
-					tags: [
-						{ name: "Type", values: [''' + json.dumps(Type) + '''] }
-					]
-					after: ''' + json.dumps(cursor) + '''
-				) {
-					edges {
-						node {
-							id
-							owner {
-								address
-							}
-							tags {
-								name
-								value
-							}
-						}
-						cursor
-					}
-				}
-			}
-		'''}
-	)
-	cursor = None
-	data = resp.json()
-	if 'data' not in data:
-		raise Exception(data)
-	edges = data['data']['transactions']['edges']
-	if len(edges):
-		cursor = edges[-1]['cursor']
-	objects = [
-		dict(
-			txid = node['id'],
-			owner = node['owner']['address'],
-			tags = {tag['name']: tag['value'] for tag in node['tags']}
-		)
-		for node in (edge['node'] for edge in edges)
-	]
-	return objects, cursor
+GATEWAY_URI='https://arweave.net'
 
 def yield_all(uri, Type):
-	cursor = None
+	session = requests.Session()
+	cursor = ''
 	while True:
-		objs, cursor = get_page(uri, Type, cursor = cursor)
-		if not len(objs):
+		resp = session.post(uri + '/graphql',
+			json={'query':'''
+				query {
+					transactions(
+						tags: [
+							{ name: "Type", values: [''' + json.dumps(Type) + '''] }
+						]
+						after: ''' + json.dumps(cursor) + '''
+					) {
+						edges {
+							node {
+								id
+								owner {
+									address
+								}
+								tags {
+									name
+									value
+								}
+							}
+							cursor
+						}
+					}
+				}
+			'''}
+		)
+		data = resp.json()
+		if 'data' not in data:
+			raise Exception(data)
+		edges = data['data']['transactions']['edges']
+		if not len(edges):
 			break
-		yield from objs
+		for edge in edges:
+			cursor = edge['cursor']
+			node = edge['node']
+			data = session.get(uri + '/' + edge['node']['id'])
+			try:
+				data = data.json()
+			except:
+				data = data.text
+			yield dict(
+				txid = node['id'],
+				owner = node['owner']['address'],
+				tags = {tag['name']: tag['value'] for tag in node['tags']},
+				data = data,
+			)
 
-
-for obj in yield_all(GRAPHQL_URI, 'update-ref'):
+for obj in yield_all(GATEWAY_URI, 'update-ref'):
 	print(obj)
 
 raise Exception('===> This is just a prototype to show git updates from arweave. <===')
