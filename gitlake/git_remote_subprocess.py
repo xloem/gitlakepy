@@ -74,7 +74,7 @@ class GitRemoteSubprocess:
                     except:
                         if self.remote_shadow is not None:
                             raise
-                    self.remote_shadow = git.Repo.init(shadow_gitdir, mkdir = True, bare = True)
+                    self.remote_shadow = git.Repo.init(self.shadow_gitdir, mkdir = True, bare = True)
 
                     # TODO TODO TODO TODO TODO
                     # ==> code went here to copy objects in from other forks (remotes) in a loop with try/catch
@@ -177,16 +177,14 @@ class GitRemoteSubprocess:
 class ConfigSectionProxy(configparser.SectionProxy):
     def __init__(self, cfgobj, section):
         self._cfg = cfgobj
-        super().__init__(self._cfg, section)
+        super().__init__(self._cfg.config, section)
     def __enter__(self, *params):
         self._cfg.__enter__(*params)
-        super().__enter__(*params)
         return self
     def __exit__(self, *params):
-        super().__exit__(*params)
         self._cfg.__exit__(*params)
 
 class RemoteConfigProxy(ConfigSectionProxy):
     def __init__(self, remote):
-        cfg = remote.config_writer#()
+        cfg = remote.config_writer
         super().__init__(cfg, cfg._section_name)
