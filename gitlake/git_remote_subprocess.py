@@ -4,8 +4,9 @@ import configparser, hashlib, re, sys, os, shutil
 
 class GitRemoteSubprocess:
     '''A gitremote-helpers remote that uses a shadow directory and launches git-receive-pack and git-upload-pack subprocesses.
-    This lets anything that can upload and download a folder be a git remote.
+    This lets anything that can upload and download a folder be a git remote, by implementing the upload() and download() methods.
     '''
+
     def __init__(self, git_dir = '.', url = None, remote_name = None, protocol = None):
         self.DISTINGUISHING_FILENAME = f'git-remote-{protocol}'
         self.DISTINGUISHING_TEXT = f'This is a {self.DISTINGUISHING_FILENAME} repository.'
@@ -32,22 +33,25 @@ class GitRemoteSubprocess:
             if self.push_url is not None:
                 with self.local_config as cfg:
                     if 'pushurl' not in cfg:
-                        cfg['pushurl'] = self.push_url
-                        cfg['url'] = self.fetch_url
+                        cfg['pushurl'] = self.protocol + '://' + self.push_url
+                        cfg['url'] = self.protocol + '://' + self.fetch_url
 
     @classmethod
-    def launch(cls):
-        if len(sys.argv) > 3:
+    def launch(cls, protocol = None):
+        '''Launch as a gitremote-helpers remote.'''
+        if len(sys.argv) == 3:
             remote_name = sys.argv[2]
             url = sys.argv[3]
-        elif len(argv) > 2:
+        elif len(sys.argv) == 2:
             remote_name = None
             url = sys.argv[2]
-        if sys.argv[0].startswith('git-remote-'):
-            protocol = sys.argv[0][len('git-remote-'):]
         else:
-            protocol = None
+            raise Exception(f'{sys.argv[0]} is a git remote')
+        if protocol is None and sys.argv[0].startswith('git-remote-'):
+            protocol = sys.argv[0][len('git-remote-'):]
         git_dir = os.environ['GIT_DIR']
+        if git_dir is None:
+            git_dir = git.Git().rev_parse(git_dir = True)
         remote = cls(git_dir=git_dir, url=url, remote_name=remote_name, protocol=protocol)
         remote.run()
 
@@ -99,9 +103,9 @@ class GitRemoteSubprocess:
            Loose objects will have been removed.
            The most important paths are:
            HEAD packed-refs objects/ info/ refs/ 
-       '''
-       raise NotImplementedError()
-
+        '''
+        raise NotImplementedError()
+    
     def _download(self):
         os.makedirs(self.shadow_gitdir, exist_ok=True)
         self.download(self.shadow_gitdir)
@@ -151,18 +155,6 @@ class GitRemoteSubprocess:
     def url2fetchpush(self, url):
         '''can override to generate two different urls for push access. both are stored in local config.'''
         return url, None
-
-    @classmethod
-    def run(cls, argv):
-        '''Launch as a gitremote-helpers remote.'''
-        if len(argv) > 3:
-            remotename = argv[2]
-            origurl = argv[3]
-        else:
-            remotename = None
-            origurl = argv[2]
-
-        remotename = argvp3[ 
         
     @property
     def local_config(self):
@@ -182,8 +174,8 @@ class GitRemoteSubprocess:
     
 
 
-class ConfigSectionProxy(configparser.ConfigSectionProxy):
-    def __init__(self, cfgobj, section)
+class ConfigSectionProxy(configparser.SectionProxy):
+    def __init__(self, cfgobj, section):
         self._cfg = cfgobj
         super().__init__(self._cfg, section)
     def __enter__(self, *params):
@@ -195,6 +187,6 @@ class ConfigSectionProxy(configparser.ConfigSectionProxy):
         self._cfg.__exit__(*params)
 
 class RemoteConfigProxy(ConfigSectionProxy):
-    def __init__(self, remote)
+    def __init__(self, remote):
         cfg = remote.config_writer()
         super.__init__(cfg, cfg._section_name)
