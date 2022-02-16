@@ -1,5 +1,5 @@
 import git
-import configparser, hashlib, re, sys, os
+import configparser, hashlib, re, sys, os, shutil
 
 
 class GitRemoteSubprocess:
@@ -7,6 +7,8 @@ class GitRemoteSubprocess:
     This lets anything that can upload and download a folder be a git remote.
     '''
     def __init__(self, git_dir = '.', url = None, remote_name = None, protocol = None):
+        self.DISTINGUISHING_FILENAME = f'git-remote-{protocol}'
+        self.DISTINGUISHING_TEXT = f'This is a {self.DISTINGUISHING_FILENAME} repository.'
         self.orig_url = url
         proto_mkpt = url.find('://')
         if proto_mkpt != -1:
@@ -19,6 +21,7 @@ class GitRemoteSubprocess:
         self.remote_name = remote_name
         self.local = self.path2repo(environ['GIT_DIR'])
         self.shadow_gitdir = os.path.join(self.outer_repo.git_dir, self.__class__.name, self.id())
+        self.shadow_gitdir_tmp = os.path.join(self.outer_repo.git_dir, self.__class__.name, 'git.new')
 
         try:
             self.remote_shadow = git.Repo(self.shadow_gitdir)
@@ -68,6 +71,7 @@ class GitRemoteSubprocess:
 
                     # TODO TODO TODO TODO TODO
                     # ==> code went here to copy objects in from other forks (remotes) in a loop with try/catch
+                    # ==> git also has a way to indicate other dirs and urls to pull packfiles from, partial but better than copying
 
                     self.remote_config().set_value('gc', 'auto', 0).release()
                 else:
@@ -100,7 +104,39 @@ class GitRemoteSubprocess:
             raise
 
     def _upload(self):
-        raise NotImplementedError()
+        # mirror_path_new is self.shadow_gitdir_tmp
+        # mirror_path is self.shadow_gitdir
+        if os.path.exists(self.shadow_gitdir_tmp):
+            if os.path.isdir(self.shadow_gitdir_tmp) and not os.path.islink(self.shadow_gitdir_tmp):
+                shutil.rmtree(self.shadow_gitdir_tmp)
+            else:
+                os.unlink(self.shadow_gitdir_tmp)
+        cleanrepo = git.Repo.clone_from(self.shadow_gitdir, self.shadow_gitdir_tmp, multi_options = ['--mirror', '--bare']) 
+        cleanrepo.config_writer().set_value('gc', 'auto', 0).release()
+        cleanrepo.git.pack_objects('objects/pack/pack', all=True, include_tag=True, unpacked=True, incremental=True, non_empty=True, local=True, compression=9, delta_base_offset=True, pack_loose_unreachable=True, progress=True)
+        cleanrepo.git.prune_packed()
+
+        # each first commit is the head of a commit tree that identifies forks of the same codebase.
+        # this tags each first commit for systems that can find files by content, to find forks via small ref files
+        first_commits = cleanrepo.git.rev_list('HEAD', max_parents=0).split('\n')
+        tag_name = self.fetch_url.replace(':', '/')
+        while '//' in tag_name:
+            tag_name = tag_name.replace('//', '/')
+        for idx, first_commit in enumerate(first_commits):
+            cleanrepo.git.tag(tag_name + '/' + first_commit, first_commit)
+
+        cleanrepo.git.update_server_info() # generates files needed for cloning and pulling via http, for systems with dirtree gateways
+
+        with open(os.path.join(self.shadow_gitdir_tmp, self.DISTINGUISHING_FILENAME)) as distinguishing_file:
+            distinguishing_file.write(self.DISTINGUISHING_TEXT)
+
+        # code went here to write out a 'description' file, but it seemed important to make the repository description information
+        # accessible via git somehow.
+
+        self.upload(self.shadow_gitdir_tmp)
+
+        shutil.rmtree(self.shadow_gitdir)
+        os.rename(self.shadow_gitdir_tmp, self.shadow_gitdir)
 
     def url2fetchpush(self, url):
         '''can override to generate two different urls for push access. both are stored in local config.'''
