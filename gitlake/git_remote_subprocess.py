@@ -3,7 +3,9 @@ import configparser, hashlib, re, sys
 
 
 class GitRemoteSubprocess:
-    '''A gitremote-helpers remote that uses a shadow directory and launches git-receive-pack and git-upload-pack subprocesses.'''
+    '''A gitremote-helpers remote that uses a shadow directory and launches git-receive-pack and git-upload-pack subprocesses.
+    This lets anything that can upload and download a folder be a git remote.
+    '''
     def __init__(self, git_dir = '.', url = None, remote_name = None, protocol = None):
         self.orig_url = url
         proto_mkpt = url.find('://')
@@ -16,7 +18,8 @@ class GitRemoteSubprocess:
         self.fetch_url, self.push_url = self.url2fetchpush(url)
         self.remote_name = remote_name
         self.local = self.path2repo(environ['GIT_DIR'])
-        self.shadow_gitdir = os.path.join(self.outer_repo.git_dir, 'gitlake', self.id())
+        self.shadow_gitdir = os.path.join(self.outer_repo.git_dir, self.__class__.name, self.id())
+
         try:
             self.remote_shadow = git.Repo(self.shadow_gitdir)
         except:
@@ -54,22 +57,27 @@ class GitRemoteSubprocess:
             elif line[:8] == 'connect ':
                 service = line[8:]
                 if service == 'git-upload-pack':
-                    self.download()
+                    self._download()
                 elif service == 'git-receive-pack':
                     try:
-                        self.download()
-                        if self.remote_shadow is None:
-                            self.remote_shadow = git.Repo(shadow_gitdir, mkdir = True)
+                        self._download()
                     except:
-                        if self.remote_shadow is None:
-                            self.remote_shadow = git.Repo.init(shadow_gitdir, mkdir = True, bare = True)
-                        # init if not exist
-                        ...
+                        if self.remote_shadow is not None:
+                            raise
+                    self.remote_shadow = git.Repo.init(shadow_gitdir, mkdir = True, bare = True)
+
+                    # TODO TODO TODO TODO TODO
+                    # ==> code went here to copy objects in from other forks (remotes) in a loop with try/catch
+
+                    self.remote_config().set_value('gc', 'auto', 0).release()
+                else:
+                    raise Exception('Unsupported service: ' + service)
+
+                # TODO TODO TODO TODO TODO
+                # ==> spawn the service as a subprocess, in the repo working dir, passing stdin and stdout
+
+                if service == 'git-receive-pack':
                     self.upload()
-                self.download()
-            elif line == 'connect git-receive-pack':
-                self.download()
-                # push
 
     def id(self):
         return hashlib.blake2b(self.fetch_url.encode(), digest_size=32).hexdigest()
