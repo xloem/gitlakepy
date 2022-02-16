@@ -1,5 +1,8 @@
 import git
-import configparser, hashlib, re, sys, os, shutil
+import configparser, hashlib, re, sys, os, shutil, subprocess
+
+import logging
+logging.basicConfig(level=logging.DEBUG)
 
 
 class GitRemoteSubprocess:
@@ -39,6 +42,7 @@ class GitRemoteSubprocess:
     @classmethod
     def launch(cls, protocol = None):
         '''Launch as a gitremote-helpers remote.'''
+        sys.stderr.write('launch()\n')
         if len(sys.argv) == 3:
             remote_name = sys.argv[1]
             url = sys.argv[2]
@@ -52,28 +56,33 @@ class GitRemoteSubprocess:
         git_dir = os.environ['GIT_DIR']
         if git_dir is None:
             git_dir = git.Git().rev_parse(git_dir = True)
+        else:
+            del os.environ['GIT_DIR'] # a quick way to not confuse subprocesses
+        sys.stderr.write('instantiating remote\n')
         remote = cls(git_dir=git_dir, url=url, remote_name=remote_name, protocol=protocol)
+        sys.stderr.write('calling run\n')
         remote.run()
 
     def run(self):
         ''' process gitremote-helpers commands on stdin'''
         while True:
             line = sys.stdin.readline().rstrip()
+            sys.stderr.write('got line ' + line + '\n')
             if line == 'capabilities':
                 sys.stdout.write('connect\n\n')
+                sys.stdout.flush()
             elif line[:8] == 'connect ':
                 service = line[8:]
                 if service == 'git-upload-pack':
                     self._download()
 
-                    self.remote_shadow.git.upload_pack(istream = sys.stdin, output_stream = sys.stdout)
-
                 elif service == 'git-receive-pack':
-                    try:
-                        self._download()
-                    except:
-                        if self.remote_shadow is not None:
-                            raise
+                    ## TODO TODO TODO sync down first by uncommenting
+                    #try:
+                    #    self._download()
+                    #except:
+                    #    if self.remote_shadow is not None:
+                    #        raise
                     self.remote_shadow = git.Repo.init(self.shadow_gitdir, mkdir = True, bare = True)
 
                     # TODO TODO TODO TODO TODO
@@ -81,14 +90,27 @@ class GitRemoteSubprocess:
                     # ==> git also has a way to indicate other dirs and urls to pull packfiles from, partial but better than copying
                     ## in git-remote-bsv, this is around line 110, near `if (!fse.existsSync)` and `fse.copyFileSync`
 
-                    self.remote_config().set_value('gc', 'auto', 0).release()
-
-                    self.remote_shadow.git.receive_pack(istream = sys.stdin, output_stream = sys.stdout)
+                    self.remote_config.set_value('gc', 'auto', 0).release()
 
                     self._upload()
 
                 else:
                     raise Exception('Unsupported service: ' + service)
+
+
+                sys.stderr.write('spawning ' + service + '\n')
+                proc = subprocess.Popen(
+                    (service, self.shadow_gitdir),
+                    stdin = sys.stdin,
+                    stdout = sys.stdout
+                )
+                proc.communicate()
+                proc.wait()
+                sys.stderr.write(service + ' completed\n')
+
+                if service == 'git-receive-pack':
+                    self._upload()
+
     def id(self):
         return hashlib.blake2b(self.fetch_url.encode(), digest_size=32).hexdigest()
 
@@ -127,7 +149,7 @@ class GitRemoteSubprocess:
                 os.unlink(self.shadow_gitdir_tmp)
         cleanrepo = git.Repo.clone_from(self.shadow_gitdir, self.shadow_gitdir_tmp, multi_options = ['--mirror', '--bare']) 
         cleanrepo.config_writer().set_value('gc', 'auto', 0).release()
-        cleanrepo.git.pack_objects('objects/pack/pack', all=True, include_tag=True, unpacked=True, incremental=True, non_empty=True, local=True, compression=9, delta_base_offset=True, pack_loose_unreachable=True, progress=True)
+        cleanrepo.git.pack_objects('objects/pack/pack', all=True, include_tag=True, unpacked=True, incremental=True, non_empty=True, local=True, compression=9, delta_base_offset=True, pack_loose_unreachable=True, progress=True, istream=subprocess.DEVNULL)
         cleanrepo.git.prune_packed()
 
         # each first commit is the head of a commit tree that identifies forks of the same codebase.
