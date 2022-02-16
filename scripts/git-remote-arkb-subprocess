@@ -1,17 +1,38 @@
 #!/usr/bin/env python3
 
 from gitlake.git_remote_subprocess import GitRemoteSubprocess
-import contextlib, subprocess, sys
+import contextlib, os, subprocess, sys
+
+import json, base64, hashlib
 
 class GitRemoteArkbSubprocess(GitRemoteSubprocess):
+    def url2fetchpush(self, url):
+        if ':' in url:
+            # push url of format arkb-subprocess::path/to/wallet.json:reponame
+            walletpath, reponame = url.split(':', 1)
+            walletpath = os.path.abspath(walletpath)
+
+            # convert jwk wallet to urlhash-of-owner address
+            with open(walletpath, 'r') as walletfile:
+                owner = json.load(walletfile)['n']
+            owner += '=' * ((4 - len(owner) % 4) % 4)
+            owner = base64.urlsafe_b64decode(owner)
+            address = hashlib.sha256(owner).digest()
+            address = base64.urlsafe_b64encode(address).replace(b'=', b'').decode()
+
+            return f'{address}/{reponame}', f'{walletpath}:{reponame}'
+        else:
+            return url, None
+        walletpath, path = url.spli
     def upload(self, folder):
         walletpath, path = self.push_url.split(':', 1)
         with contextlib.redirect_stdout(sys.stderr):
             subprocess.run((
                 'arkb', 'deploy', folder, '--wallet', walletpath, '--ipfs-publish',
-                f'--App=git-remote-{self.protocol}',
+                f'--App-Name=git-remote-{self.protocol}',
                 f'--Version=0.0.1',
-                f'--Repo={path}'
+                f'--Repo={path}',
+                '--Type=arkb-subprocess',
             ))
     #def download(self, folder):
     #    address, path = self.fetch_url.split('/', 1)

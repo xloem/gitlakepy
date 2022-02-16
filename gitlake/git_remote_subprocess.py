@@ -20,9 +20,9 @@ class GitRemoteSubprocess:
         url = re.sub('/+', '/', url + '/')
         self.fetch_url, self.push_url = self.url2fetchpush(url)
         self.remote_name = remote_name
-        self.local = self.path2repo(environ['GIT_DIR'])
-        self.shadow_gitdir = os.path.join(self.outer_repo.git_dir, self.__class__.name, self.id())
-        self.shadow_gitdir_tmp = os.path.join(self.outer_repo.git_dir, self.__class__.name, 'git.new')
+        self.local = self.path2repo(git_dir)
+        self.shadow_gitdir = os.path.join(self.local.git_dir, self.__class__.__name__, self.id())
+        self.shadow_gitdir_tmp = os.path.join(self.local.git_dir, self.__class__.__name__, 'git.new')
 
         try:
             self.remote_shadow = git.Repo(self.shadow_gitdir)
@@ -40,11 +40,11 @@ class GitRemoteSubprocess:
     def launch(cls, protocol = None):
         '''Launch as a gitremote-helpers remote.'''
         if len(sys.argv) == 3:
-            remote_name = sys.argv[2]
-            url = sys.argv[3]
+            remote_name = sys.argv[1]
+            url = sys.argv[2]
         elif len(sys.argv) == 2:
             remote_name = None
-            url = sys.argv[2]
+            url = sys.argv[1]
         else:
             raise Exception(f'{sys.argv[0]} is a git remote')
         if protocol is None and sys.argv[0].startswith('git-remote-'):
@@ -188,5 +188,5 @@ class ConfigSectionProxy(configparser.SectionProxy):
 
 class RemoteConfigProxy(ConfigSectionProxy):
     def __init__(self, remote):
-        cfg = remote.config_writer()
-        super.__init__(cfg, cfg._section_name)
+        cfg = remote.config_writer#()
+        super().__init__(cfg, cfg._section_name)

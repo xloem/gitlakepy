@@ -8,6 +8,6 @@ setup(name='gitlake',
       author_email='0xloem@gmail.com',
       url='https://github.com/xloem/gitlakepy',
       packages=['gitlake'],
-      scripts=['scripts/git-annex-remote-freenet','scripts/git-annex-remote-siaskynet','scripts/git-annex-remote-bsv'],
+      scripts=['scripts/git-annex-remote-freenet','scripts/git-annex-remote-siaskynet','scripts/git-annex-remote-bsv','scripts/git-remote-arkb-subprocess'],
       install_requires=['siaskynet', 'polyglot-bitcoin', 'annexremote', 'flock', 'bitcoinx'],
-     )
+)
