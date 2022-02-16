@@ -1,5 +1,5 @@
 import git
-import configparser, hashlib, re, sys
+import configparser, hashlib, re, sys, os
 
 
 class GitRemoteSubprocess:
@@ -77,10 +77,30 @@ class GitRemoteSubprocess:
                 # ==> spawn the service as a subprocess, in the repo working dir, passing stdin and stdout
 
                 if service == 'git-receive-pack':
-                    self.upload()
+                    self._upload()
 
     def id(self):
         return hashlib.blake2b(self.fetch_url.encode(), digest_size=32).hexdigest()
+
+    def download(self, gitdir):
+        '''Download or sync to gitdir any available files and paths among:
+           config HEAD packed-refs objects/ info/ refs/
+        '''
+        raise NotImplementedError()
+
+    def _download(self):
+        os.makedirs(self.shadow_gitdir, exist_ok=True)
+        self.download(self.shadow_gitdir)
+        os.makedirs(os.path.join(self.shadow_gitdir, 'refs'), exist_ok=True)
+        try:
+            self.remote_shadow = git.Repo(self.shadow_gitdir)
+            self.remote_config().set_value('gc', 'auto', 0).release()
+        except:
+            os.rmdir(os.path.join(self.shadow_gitdir, 'refs'))
+            raise
+
+    def _upload(self):
+        raise NotImplementedError()
 
     def url2fetchpush(self, url):
         '''can override to generate two different urls for push access. both are stored in local config.'''
