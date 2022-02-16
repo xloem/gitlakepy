@@ -61,6 +61,9 @@ class GitRemoteSubprocess:
                 service = line[8:]
                 if service == 'git-upload-pack':
                     self._download()
+
+                    self.remote_shadow.git.upload_pack(istream = sys.stdin, output_stream = sys.stdout)
+
                 elif service == 'git-receive-pack':
                     try:
                         self._download()
@@ -72,17 +75,16 @@ class GitRemoteSubprocess:
                     # TODO TODO TODO TODO TODO
                     # ==> code went here to copy objects in from other forks (remotes) in a loop with try/catch
                     # ==> git also has a way to indicate other dirs and urls to pull packfiles from, partial but better than copying
+                    ## in git-remote-bsv, this is around line 110, near `if (!fse.existsSync)` and `fse.copyFileSync`
 
                     self.remote_config().set_value('gc', 'auto', 0).release()
-                else:
-                    raise Exception('Unsupported service: ' + service)
 
-                # TODO TODO TODO TODO TODO
-                # ==> spawn the service as a subprocess, in the repo working dir, passing stdin and stdout
+                    self.remote_shadow.git.receive_pack(istream = sys.stdin, output_stream = sys.stdout)
 
-                if service == 'git-receive-pack':
                     self._upload()
 
+                else:
+                    raise Exception('Unsupported service: ' + service)
     def id(self):
         return hashlib.blake2b(self.fetch_url.encode(), digest_size=32).hexdigest()
 
@@ -91,6 +93,14 @@ class GitRemoteSubprocess:
            config HEAD packed-refs objects/ info/ refs/
         '''
         raise NotImplementedError()
+
+    def upload(self, gitdir):
+        '''Upload or sync from gitdir any changed files and paths.
+           Loose objects will have been removed.
+           The most important paths are:
+           HEAD packed-refs objects/ info/ refs/ 
+       '''
+       raise NotImplementedError()
 
     def _download(self):
         os.makedirs(self.shadow_gitdir, exist_ok=True)
