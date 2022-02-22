@@ -1,0 +1,115 @@
+#!/usr/bin/env python3
+
+from annexremote import Master as Main, SpecialRemote, RemoteError, UnsupportedRequest
+
+import json
+import os
+import subprocess
+
+class W3StorageRemote(SpecialRemote):
+    def __init__(self, annex):
+        super().__init__(annex)
+        self.configs = {
+            'token': 'API token for api.web3.storage'
+        }
+        self.local_dir = None
+
+    def initremote(self):
+		# initialize in repo, e.g. create folders or change settings
+        # 'git annex initremote' / 'git annex enableremote'
+
+        token = self.annex.getconfig('token')
+        #token = self.annex.getcreds('token')['password']
+        if token == '':
+            raise RemoteError('token is required')
+
+        self.w3('token', input=token+'\n')
+
+        self.prepare()
+
+
+    def prepare(self):
+        # prepare to be used for transfers, e.g. open connection
+        self.annex.info(self.w3('--version').strip())
+
+        list_output = self.w3('list', '--json')
+        self.stored = [json.loads(upload) for upload in list_output.strip().split('\n')]
+        self.stored = { upload['name']: upload for upload in self.stored }
+        total_stored = sum((item['dagSize'] for item in self.stored.values()))
+        for item in self.stored.values():
+            pins = [pin['status'] for pin in item['pins']]
+            deals = [deal['status'] for deal in item['deals']]
+            if 'Pinned' not in pins or 'Active' not in deals:
+                self.annex.info(f"{item['name']}: {' '.join(pins)} {' '.join(deals)}")
+        self.annex.info(f'{len(self.stored)} items - {total_stored // 1024 // 1024} MiB stored')
+
+    def transfer_store(self, key, filename):
+        lines = self.w3('put', filename, '--no-wrap', '--name', key).split('\n')
+        self.annex.debug('lines[0] = ' + repr(lines[0]))
+        self.annex.debug('lines[1] = ' + repr(lines[1]))
+        possible_cid = lines[0].split(' ')[-1]
+        status = json.loads(self.w3('status', possible_cid))
+        status['name'] = key
+        self.stored[key] = status
+        for url in self.cid_urls(possible_cid):
+            self.annex.seturlpresent(key, url)
+        for uri in self.cid_uris(possible_cid):
+            self.annex.seturipresent(key, uri)
+
+    def transfer_retrieve(self, key, local_file):
+        self.w3('get', self.stored[key]['cid'], '--output', local_file)
+
+    def remove(self, key):
+        #raise UnsupportedRequest()
+        return
+
+    def checkpresent(self, key):
+        return key in self.stored
+
+    def getavailability(self):
+        return 'global'
+
+    def cid_urls(self, cid):
+        return [f'https://dweb.link/ipfs/{cid}']
+
+    def cid_uris(self, cid):
+        return [f'ipfs:{cid}']
+
+    def whereis(self, key):
+        item = self.stored.get(key)
+        if item is None:
+            return ''
+        else:
+            cid = item['cid']
+            return ' '.join((self.cid_uris(cid)))
+
+    def w3(self, *params, input=None):
+        if self.local_dir is None:
+            self.local_dir = os.path.join(self.annex.getgitdir(), self.__class__.__name__, self.annex.getuuid())
+        try:
+            self.annex.debug('w3 ' + ' '.join(params))
+            result = subprocess.run(
+                ('w3', *params),
+                env=dict(HOME=self.local_dir),
+                input=input,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+                text=True
+            )
+            for line in result.stdout.split('\n'):
+                self.annex.debug(line[:80])
+            for line in result.stderr.split('\n'):
+                self.annex.debug(line[:80])
+        except subprocess.CalledProcessError as err:
+            raise RemoteError(err.stdout + err.stderr)
+        return result.stdout
+    #def setup(self):
+    #    subprocess.run(('w3', 
+
+
+if __name__ == '__main__':
+    main = Main()
+    remote = W3StorageRemote(main)
+    main.LinkRemote(remote)
+    main.Listen()
