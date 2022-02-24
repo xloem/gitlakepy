@@ -2,9 +2,7 @@
 
 from annexremote import Master as Main, SpecialRemote, RemoteError, UnsupportedRequest
 
-import json
-import os
-import subprocess
+import json, os, random, subprocess, time
 
 class W3StorageRemote(SpecialRemote):
     def __init__(self, annex):
@@ -36,11 +34,10 @@ class W3StorageRemote(SpecialRemote):
         self.stored = [json.loads(upload) for upload in list_output.strip().split('\n')]
         self.stored = { upload['name']: upload for upload in self.stored }
         total_stored = sum((item['dagSize'] for item in self.stored.values()))
-        for item in self.stored.values():
-            pins = [pin['status'] for pin in item['pins']]
-            deals = [deal['status'] for deal in item['deals']]
-            if 'Pinned' not in pins or ('Active' not in deals and 'Published' not in deals):
-                self.annex.info(f"{item['name']}: {' '.join(pins)} {' '.join(deals)}")
+        for key in self.stored:
+            statuses = self.keystatuses(key)
+            if 'Pinned' not in statuses or ('Active' not in statuses and 'Published' not in statuses):
+                self.annex.info(f"{key}: {' '.join(statuses)}")
         self.annex.info(f'{len(self.stored)} items - {total_stored // 1024 // 1024} MiB stored')
 
     def transfer_store(self, key, filename):
@@ -50,6 +47,7 @@ class W3StorageRemote(SpecialRemote):
         possible_cid = lines[0].split(' ')[-1]
         status = json.loads(self.w3('status', possible_cid))
         status['name'] = key
+        status['_git_annex_just_put'] = True
         self.stored[key] = status
         for url in self.cid_urls(possible_cid):
             self.annex.seturlpresent(key, url)
@@ -64,7 +62,8 @@ class W3StorageRemote(SpecialRemote):
         return
 
     def checkpresent(self, key):
-        return key in self.stored
+        statuses = self.keystatuses(key)
+        return 'Pinned' in statuses or 'Active' in statuses or 'Published' in statuses or 'JustPut' in statuses
 
     def getavailability(self):
         return 'global'
@@ -86,7 +85,7 @@ class W3StorageRemote(SpecialRemote):
             cid = item['cid']
             return ' '.join((self.cid_uris(cid)))
 
-    def w3(self, *params, input=None):
+    def w3(self, *params, input=None, backoff_secs=8):
         if self.local_dir is None:
             self.local_dir = os.path.join(self.annex.getgitdir(), self.__class__.__name__, self.annex.getuuid())
         try:
@@ -104,12 +103,31 @@ class W3StorageRemote(SpecialRemote):
                 self.annex.debug(line[:80])
             for line in result.stderr.split('\n'):
                 self.annex.debug(line[:80])
+            self.annex.debug('PROCESS SUCCESS w3 ' + ' '.join(params))
         except subprocess.CalledProcessError as err:
-            raise RemoteError(err.stdout + err.stderr)
+            self.annex.info('err: w3 ' + ' '.join(params))
+            if 'JSON.parse' in err.stderr:
+                delay = backoff_secs + backoff_secs * random.random()
+                self.annex.info(f'JSON response parse exception. Waiting {int(delay+0.5)} seconds.')
+                for line in err.stdout.split('\n'):
+                    self.annex.info(line)
+                for line in err.stderr.split('\n'):
+                    self.annex.info(line)
+                time.sleep(delay)
+                self.annex.info(f'Done waiting for {int(delay+0.5)} seconds.')
+                return self.w3(*params, input=input, backoff_secs = delay)
+
+            raise RemoteError((err.stdout + ' '  + err.stderr).replace('\n', ' '))
         return result.stdout
     #def setup(self):
     #    subprocess.run(('w3', 
 
+    def keystatuses(self, key):
+        item = self.stored.get(key, dict(pin=[], deal=[]))
+        result = set((*(pin['status'] for pin in item.get('pins',())), *(deal['status'] for deal in item.get('deals',()))))
+        if '_git_annex_just_put' in item:
+            result.add('JustPut')
+        return result
 
 if __name__ == '__main__':
     main = Main()
