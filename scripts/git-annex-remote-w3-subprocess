@@ -30,9 +30,12 @@ class W3StorageRemote(SpecialRemote):
         # prepare to be used for transfers, e.g. open connection
         self.annex.info(self.w3('--version').strip())
 
-        list_output = self.w3('list', '--json')
-        self.stored = [json.loads(upload) for upload in list_output.strip().split('\n')]
-        self.stored = { upload['name']: upload for upload in self.stored }
+        list_output = self.w3('list', '--json').strip()
+        if len(list_output) > 0:
+            self.stored = [json.loads(upload) for upload in list_output.split('\n')]
+            self.stored = { upload['name']: upload for upload in self.stored }
+        else:
+            self.stored = {}
         total_stored = sum((item['dagSize'] for item in self.stored.values()))
         for key in self.stored:
             statuses = self.keystatuses(key)
@@ -41,17 +44,23 @@ class W3StorageRemote(SpecialRemote):
         self.annex.info(f'{len(self.stored)} items - {total_stored // 1024 // 1024} MiB stored')
 
     def transfer_store(self, key, filename):
-        lines = self.w3('put', filename, '--no-wrap', '--name', key).split('\n')
-        self.annex.debug('lines[0] = ' + repr(lines[0]))
-        self.annex.debug('lines[1] = ' + repr(lines[1]))
-        possible_cid = lines[0].split(' ')[-1]
-        status = json.loads(self.w3('status', possible_cid))
+        with open(filename, 'rb') as file:
+            file.seek(0, os.SEEK_END)
+            size = file.tell()
+        #if size <= 100 * 1024 * 1024 * 1024:
+        #else:
+        if True:
+            lines = self.w3('put', filename, '--no-wrap', '--name', key).split('\n')
+            self.annex.debug('lines[0] = ' + repr(lines[0]))
+            self.annex.debug('lines[1] = ' + repr(lines[1]))
+            cid = lines[0].split(' ')[-1]
+        status = json.loads(self.w3('status', cid))
         status['name'] = key
         status['_git_annex_just_put'] = True
         self.stored[key] = status
-        for url in self.cid_urls(possible_cid):
+        for url in self.cid_urls(cid):
             self.annex.seturlpresent(key, url)
-        for uri in self.cid_uris(possible_cid):
+        for uri in self.cid_uris(cid):
             self.annex.seturipresent(key, uri)
 
     def transfer_retrieve(self, key, local_file):
@@ -63,6 +72,7 @@ class W3StorageRemote(SpecialRemote):
 
     def checkpresent(self, key):
         statuses = self.keystatuses(key)
+        self.annex.debug(key + ' statuses: ' + ' '.join(statuses))
         return 'Pinned' in statuses or 'Active' in statuses or 'Published' in statuses or 'JustPut' in statuses
 
     def getavailability(self):
