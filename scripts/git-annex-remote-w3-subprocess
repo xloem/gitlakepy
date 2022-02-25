@@ -116,9 +116,9 @@ class W3StorageRemote(SpecialRemote):
             self.annex.debug('PROCESS SUCCESS w3 ' + ' '.join(params))
         except subprocess.CalledProcessError as err:
             self.annex.info('err: w3 ' + ' '.join(params))
-            if 'JSON.parse' in err.stderr:
+            if 'JSON.parse' in err.stderr or 'Too Many Requests' in err.stdout:
                 delay = backoff_secs + backoff_secs * random.random()
-                self.annex.info(f'JSON response parse exception. Waiting {int(delay+0.5)} seconds.')
+                self.annex.info(f'Waiting {int(delay+0.5)} seconds.')
                 for line in err.stdout.split('\n'):
                     self.annex.info(line)
                 for line in err.stderr.split('\n'):
