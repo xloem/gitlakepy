@@ -26,9 +26,9 @@ class ArkbStorageRemote(SpecialRemote):
         if wallet == '':
             raise RemoteError('wallet is required')
         try:
-            with open('wallet', 'rt') as wf:
+            with open(wallet, 'rt') as wf:
                 wallet = wf.read()
-            self.annex.setconfig('wallet', wallet)
+            self.annex.setconfig('wallet', wallet.replace('\n', ' '))
         except:
             pass
 
@@ -83,7 +83,7 @@ class ArkbStorageRemote(SpecialRemote):
                 '--tag-name', 'git-annex-key-' + name,
                 '--tag-value', value
             ))
-        lines = self.arkb(
+        output = self.arkb(
                 'deploy',
                 filename,
                 '--tag-name', 'IPFS-Add',
@@ -93,7 +93,10 @@ class ArkbStorageRemote(SpecialRemote):
                 *keytagparams,
                 '--auto-confirm',
                 *self.params_deploy
-        ).split('\n')
+        )
+        if 'Failed to deploy' in output:
+            raise RemoteError(output.replace('\n', ' '))
+        lines = output.split('\n')
         self.annex.debug('lines[-3] = ' + repr(lines[-3]))
         self.annex.debug('lines[-2] = ' + repr(lines[-2]))
         self.annex.debug('lines[-1] = ' + repr(lines[-1]))
