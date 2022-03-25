@@ -12,7 +12,8 @@ class ArkbStorageRemote(SpecialRemote):
         super().__init__(annex)
         self.configs = {
             'wallet': 'Path or jwk wallet',
-            'bundler': 'ANS-104 bundler node'
+            'bundler': 'ANS-104 bundler node url',
+            'gateway': 'Arweave gateway url',
         }
         self.local_dir = None
 
@@ -57,6 +58,11 @@ class ArkbStorageRemote(SpecialRemote):
         self.bundler = self.annex.getconfig('bundler')
         if self.bundler:
             self.params_deploy = (*self.params_deploy, '--use-bundler', self.bundler)
+        self.gateway = self.annex.getconfig('gateway')
+        if not self.gateway:
+            self.gateway = 'https://arweave.net'
+        else:
+            self.params_deploy = (*self.params_deploy,'--gateway', self.gateway)
 
 
     def transfer_store(self, key, filename):
@@ -132,7 +138,7 @@ class ArkbStorageRemote(SpecialRemote):
         return
 
     def txids(self, key):
-        return [url.split('/',3)[-1] for url in self.annex.geturls(key, 'https://arweave.net/')]
+        return [url.split('/',3)[-1] for url in self.annex.geturls(key, self.gateway + '/')]
     def checkpresent(self, key):
         for txid in self.txids(key):
             for url in self.txid_urls(txid):
@@ -164,7 +170,7 @@ class ArkbStorageRemote(SpecialRemote):
 
     def txid_urls(self, txid):
         return [
-            f'https://arweave.net/{txid}',
+            f'{self.gateway}/{txid}',
         ]
 
     def txid_uris(self, txid):
