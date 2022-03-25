@@ -102,7 +102,7 @@ class W3StorageRemote(SpecialRemote):
             self.annex.debug('w3 ' + ' '.join(params))
             result = subprocess.run(
                 (os.environ.get('W3', 'w3'), *params),
-                env=dict(HOME=self.local_dir),
+                env={'PATH':os.environ.get('PATH', ''), 'HOME':self.local_dir},
                 input=input,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -126,6 +126,9 @@ class W3StorageRemote(SpecialRemote):
                 time.sleep(delay)
                 self.annex.info(f'Done waiting for {int(delay+0.5)} seconds.')
                 return self.w3(*params, input=input, backoff_secs = delay)
+            elif 'EAI_AGAIN' in err.stderr:
+                self.annex.info(f'EAI_AGAIN')
+                return self.w3(*params, input=input, backoff_secs = backoff_secs)
 
             raise RemoteError((err.stdout + ' '  + err.stderr).replace('\n', ' '))
         return result.stdout

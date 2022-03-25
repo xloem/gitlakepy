@@ -2,7 +2,7 @@
 from distutils.core import setup
 
 setup(name='gitlake',
-      version='0.42',
+      version='0.43',
       description='Decentralized special remotes for git-annex',
       author='Karl Semich',
       author_email='0xloem@gmail.com',
@@ -12,8 +12,10 @@ setup(name='gitlake',
           'scripts/git-annex-remote-freenet',
           'scripts/git-annex-remote-siaskynet',
           'scripts/git-annex-remote-bsv',
+          'scripts/git-annex-remote-arkb-subprocess',
           'scripts/git-remote-arkb-subprocess',
-          'scripts/git-annex-remote-w3-subprocess'
+          'scripts/git-annex-remote-w3-subprocess',
+          'scripts/git-annex-remote-w3-hybrid'
       ],
       install_requires=['siaskynet', 'polyglot-bitcoin', 'annexremote', 'flock', 'bitcoinx'],
 )

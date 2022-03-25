@@ -1,0 +1,233 @@
+#!/usr/bin/env python3
+
+from annexremote import Master as Main, SpecialRemote, RemoteError, UnsupportedRequest
+
+import json, os, random, subprocess, time
+import re, requests
+
+ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+
+class ArkbStorageRemote(SpecialRemote):
+    def __init__(self, annex):
+        super().__init__(annex)
+        self.configs = {
+            'wallet': 'Path or jwk wallet',
+            'bundler': 'ANS-104 bundler node'
+        }
+        self.local_dir = None
+
+    def initremote(self):
+		# initialize in repo, e.g. create folders or change settings
+        # 'git annex initremote' / 'git annex enableremote'
+
+        wallet = self.annex.getconfig('wallet')
+        #token = self.annex.getcreds('token')['password']
+        if wallet == '':
+            raise RemoteError('wallet is required')
+        try:
+            with open('wallet', 'rt') as wf:
+                wallet = wf.read()
+            self.annex.setconfig('wallet', wallet)
+        except:
+            pass
+
+        #self.w3('token', input=token+'\n')
+        self.prepare()
+
+
+    def prepare(self):
+        # prepare to be used for transfers, e.g. open connection
+        self.local_dir = os.path.join(self.annex.getgitdir(), self.__class__.__name__, self.annex.getuuid())
+        os.makedirs(self.local_dir, exist_ok=True)
+        self.wallet_path = os.path.join(self.local_dir, 'wallet.json')
+        try:
+            with open(self.wallet_path, 'rt') as wallet_file:
+                wallet = wallet_file.read()
+            assert wallet == self.annex.getconfig('wallet')
+        except:
+            tmp_wallet_path = self.wallet_path + '.tmp'
+            with open(tmp_wallet_path, 'wt') as wallet_file:
+                wallet_file.write(self.annex.getconfig('wallet'))
+            os.chmod(tmp_wallet_path, 0o400)
+            os.rename(tmp_wallet_path, self.wallet_path)
+
+        self.annex.info('arkb ' + self.arkb('version').strip())
+
+        self.params_deploy = ('--wallet', self.wallet_path)
+        self.bundler = self.annex.getconfig('bundler')
+        if self.bundler:
+            self.params_deploy = (*self.params_deploy, '--use-bundler', self.bundler)
+
+
+    def transfer_store(self, key, filename):
+        #with open(filename, 'rb') as file:
+        #    file.seek(0, os.SEEK_END)
+        #    size = file.tell()
+        keybackend, keyname = key.split('--')
+        keybackend, *keyparts = keybackend.split('-')
+        keyparts = {
+            keypart[0]: keypart[1:]
+            for keypart in keyparts
+        }
+        keyparts['backend'] = keybackend
+        keyparts['name'] = keyname
+        keytagparams = []
+        for name, value in keyparts.items():
+            keytagparams.extend((
+                '--tag-name', 'git-annex-key-' + name,
+                '--tag-value', value
+            ))
+        lines = self.arkb(
+                'deploy',
+                filename,
+                '--tag-name', 'IPFS-Add',
+                '--tag-value', key,
+                '--tag-name', 'git-annex-key',
+                '--tag-value', key,
+                *keytagparams,
+                '--auto-confirm',
+                *self.params_deploy
+        ).split('\n')
+        self.annex.debug('lines[-3] = ' + repr(lines[-3]))
+        self.annex.debug('lines[-2] = ' + repr(lines[-2]))
+        self.annex.debug('lines[-1] = ' + repr(lines[-1]))
+        txid = lines[-2].split('/')[-1]
+        for url in self.txid_urls(txid):
+            self.annex.seturlpresent(key, url)
+        for uri in self.txid_uris(txid):
+            self.annex.seturipresent(key, uri)
+
+    def transfer_retrieve(self, key, local_file):
+        last_exc = None
+        for txid in self.txids(key):
+            for url in self.txid_urls(txid):
+                try:
+                    self.retrieve_url(url, local_file)
+                    return
+                except Exception as exc:
+                    last_exc = exc
+                    continue
+            for url in self.txid_tmpurls(txid):
+                try:
+                    self.retrieve_url(url, local_file)
+                    self.annex.info(f'{key} stalled at {url}')
+                    return
+                except Exception as exc:
+                    last_exc = exc
+                    continue
+        raise last_exc
+
+    def retrieve_url(self, url, local_file):
+        with requests.get(url, stream=True) as stream:
+            stream.raise_for_status()
+            with open(local_file, 'wb') as file:
+                for chunk in stream.iter_content(chunk_size=8192):
+                    file.write(chunk)
+
+    def remove(self, key):
+        for url in self.txid_urls(txid):
+            self.annex.seturlmissing(key, url)
+        for uri in self.txid_uris(txid):
+            self.annex.seturimissing(key, uri)
+        return
+
+    def txids(self, key):
+        return [url.split('/',3)[-1] for url in self.annex.geturls(key, 'https://arweave.net/')]
+    def checkpresent(self, key):
+        for txid in self.txids(key):
+            for url in self.txid_urls(txid):
+                try:
+                    requests.head(url).raise_for_status()
+                    return True
+                except:
+                    continue
+            for url in self.txid_tmpurls(txid):
+                try:
+                    requests.head(url).raise_for_status()
+                    self.annex.info(f'{key} stalled at {url}')
+                    return True
+                except:
+                    continue
+        return False
+
+    def getavailability(self):
+        return 'global'
+
+    def txid_tmpurls(self, txid):
+        if self.bundler:
+            return [
+                f'{self.bundler}/tx/{txid}/data',
+            ]
+        else:
+            return []
+
+
+    def txid_urls(self, txid):
+        return [
+            f'https://arweave.net/{txid}',
+        ]
+
+    def txid_uris(self, txid):
+        return [
+        ]
+
+    #def whereis(self, key):
+    #    item = self.stored.get(key)
+    #    if item is None:
+    #        return ''
+    #    else:
+    #        cid = item['cid']
+    #        return ' '.join((self.cid_uris(cid)))
+
+    def arkb(self, *params, input=None, backoff_secs=8):
+        try:
+            self.annex.debug('arkb ' + ' '.join(params))
+            result = subprocess.run(
+                (os.environ.get('ARKB', 'arkb'), *params),
+                env={'PATH':os.environ.get('PATH', ''), 'HOME':self.local_dir},
+                input=input,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+                text=True
+            )
+            stdout = ansi_escape.sub('', result.stdout)
+            stderr = ansi_escape.sub('', result.stderr)
+            for line in stdout.split('\n'):
+                self.annex.debug(line[:80])
+            for line in stderr.split('\n'):
+                self.annex.debug(line[:80])
+            self.annex.debug('PROCESS SUCCESS arkb ' + ' '.join(params))
+        except subprocess.CalledProcessError as err:
+            self.annex.info('err: arkb ' + ' '.join(params))
+            #if 'JSON.parse' in err.stderr or 'Too Many Requests' in err.stdout:
+            #    delay = backoff_secs + backoff_secs * random.random()
+            #    self.annex.info(f'Waiting {int(delay+0.5)} seconds.')
+            #    for line in err.stdout.split('\n'):
+            #        self.annex.info(line)
+            #    for line in err.stderr.split('\n'):
+            #        self.annex.info(line)
+            #    time.sleep(delay)
+            #    self.annex.info(f'Done waiting for {int(delay+0.5)} seconds.')
+            #    return self.w3(*params, input=input, backoff_secs = delay)
+            #elif 'EAI_AGAIN' in err.stderr:
+            #    self.annex.info(f'EAI_AGAIN')
+            #    return self.w3(*params, input=input, backoff_secs = backoff_secs)
+
+            raise RemoteError((err.stdout + ' '  + err.stderr).replace('\n', ' '))
+        return stdout
+    #def setup(self):
+    #    subprocess.run(('w3', 
+
+    #def keystatuses(self, key):
+    #    item = self.stored.get(key, dict(pin=[], deal=[]))
+    #    result = set((*(pin['status'] for pin in item.get('pins',())), *(deal['status'] for deal in item.get('deals',()))))
+    #    if '_git_annex_just_put' in item:
+    #        result.add('JustPut')
+    #    return result
+
+if __name__ == '__main__':
+    main = Main()
+    remote = ArkbStorageRemote(main)
+    main.LinkRemote(remote)
+    main.Listen()
