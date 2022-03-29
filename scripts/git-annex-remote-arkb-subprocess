@@ -2,7 +2,7 @@
 
 from annexremote import Master as Main, SpecialRemote, RemoteError, UnsupportedRequest
 
-import json, os, random, subprocess, time
+import json, os, random, shutil, subprocess, time
 import re, requests
 
 ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
@@ -14,8 +14,10 @@ class ArkbStorageRemote(SpecialRemote):
             'wallet': 'Path or jwk wallet',
             'bundler': 'ANS-104 bundler node url',
             'gateway': 'Arweave gateway url',
+            'combine-to-bytes': 'Consolidate uploads up to this many bytes',
         }
         self.local_dir = None
+        self.closed = False
 
     def initremote(self):
 		# initialize in repo, e.g. create folders or change settings
@@ -52,9 +54,9 @@ class ArkbStorageRemote(SpecialRemote):
             os.chmod(tmp_wallet_path, 0o400)
             os.rename(tmp_wallet_path, self.wallet_path)
 
-        self.annex.info('arkb ' + self.arkb('version').strip())
+        self._info('arkb ' + self.arkb('version').strip())
 
-        self.params_deploy = ('--wallet', self.wallet_path)
+        self.params_deploy = ('--wallet', self.wallet_path, '--no-colors')
         self.bundler = self.annex.getconfig('bundler')
         if self.bundler:
             self.params_deploy = (*self.params_deploy, '--use-bundler', self.bundler)
@@ -63,50 +65,137 @@ class ArkbStorageRemote(SpecialRemote):
             self.gateway = 'https://arweave.net'
         else:
             self.params_deploy = (*self.params_deploy,'--gateway', self.gateway)
+        self.combine_to = self.annex.getconfig('combine-to-bytes')
+        if self.combine_to == '' and self.bundler:
+            self.combine_to = 100000 * 32
+        if self.combine_to:
+            self.combine_to = int(self.combine_to)
+            self.combining = {}
+            self.combined = 0
+            self.combining_dir = os.path.join(self.local_dir, str(os.getpid()))
+            os.makedirs(self.combining_dir, exist_ok = True)
 
-
-    def transfer_store(self, key, filename):
-        #with open(filename, 'rb') as file:
-        #    file.seek(0, os.SEEK_END)
-        #    size = file.tell()
-        keybackend, keyname = key.split('--')
-        keybackend, *keyparts = keybackend.split('-')
-        keyparts = {
-            keypart[0]: keypart[1:]
-            for keypart in keyparts
-        }
-        keyparts['backend'] = keybackend
-        keyparts['name'] = keyname
-        keytagparams = []
-        for name, value in keyparts.items():
-            keytagparams.extend((
-                '--tag-name', 'git-annex-key-' + name,
-                '--tag-value', value
-            ))
+    def do_combine(self):
+        if len(self.combining) == 0:
+            return
+        index_filename = 'index.txt'
+        with open(os.path.join(self.combining_dir, index_filename), 'wt') as index_file:
+            for key in self.combining:
+                index_file.write(key + '\n')
         output = self.arkb(
-                'deploy',
-                filename,
-                '--tag-name', 'IPFS-Add',
-                '--tag-value', key,
-                '--tag-name', 'git-annex-key',
-                '--tag-value', key,
-                *keytagparams,
-                '--auto-confirm',
-                *self.params_deploy
+            'deploy',
+            self.combining_dir,
+            '--auto-confirm',
+            '--index', index_filename,
+            *self.params_deploy
         )
         if 'Failed to deploy' in output:
             raise RemoteError(output.replace('\n', ' '))
-        lines = output.split('\n')
-        self.annex.debug('lines[-3] = ' + repr(lines[-3]))
-        self.annex.debug('lines[-2] = ' + repr(lines[-2]))
-        self.annex.debug('lines[-1] = ' + repr(lines[-1]))
-        txid = lines[-2].split('/')[-1]
-        for url in self.txid_urls(txid):
-            self.annex.seturlpresent(key, url)
-        for uri in self.txid_uris(txid):
-            self.annex.seturipresent(key, uri)
+        with open(os.path.join(self.combining_dir, 'manifest.arkb')) as manifest_file:
+            manifest = json.load(manifest_file)
+        key_urls = []
+        for key, props in manifest['paths'].items():
+            txid = props['id']
+            self._debug(f'{key}: {self.gateway}/{txid}')
+            if key in self.combining:
+                for url in (*self.txid_urls(txid), *self.txid_uris(txid)):
+                    key_urls.append((key, url))
+        if self.closed:
+            key_urls = '\n'.join((' '.join(keyurl) for keyurl in keyurls))
+            result = subprocess.run(
+                ('git', 'annex', 'registerurl', '--batch'),
+                input=keyurls,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+                text=True
+            )
+            for line in result.stdout:
+                self._debug(line)
+            for line in result.stderr:
+                self._info(line)
+        else:
+            for key, url in key_urls:
+                self.annex.seturlpresent(key, url)
+        shutil.rmtree(self.combining_dir)
+        os.makedirs(self.combining_dir)
+        self.combined = 0
+        self.combining = {}
+
+
+    def finish(self):
+        self.closed = True
+        self.tty = open('/dev/tty', 'wt')
+        if hasattr(self, 'combine_to') and self.combine_to:
+            if self.combined:
+                self.do_combine()
+            shutil.rmtree(self.combining_dir)
+    def _info(self, txt):
+        if self.closed:
+            self.tty.write(f'Pre-shutdown: {txt}\n')
+        else:
+            self.annex.info(txt)
+    def _debug(self, txt):
+        if self.closed:
+            return self._info(txt)
+        else:
+            self.annex.debug(txt)
+
+    def transfer_store(self, key, filename):
+        with open(filename, 'rb') as file:
+            file.seek(0, os.SEEK_END)
+            size = file.tell()
+        if self.combine_to and size < self.combine_to:
+            if self.combined + size > self.combine_to:
+                self.do_combine()
+            newfilename = key #'c-' + str(len(self.combining))
+            newfullpath = os.path.join(self.combining_dir, newfilename)
+            os.rename(filename, newfullpath)
+            self.combining[key] = size#newfullpath#(newfilename, keytagparams)
+            self.combined += size
+        else:
+            keybackend, keyname = key.split('--')
+            keybackend, *keyparts = keybackend.split('-')
+            keyparts = {
+                keypart[0]: keypart[1:]
+                for keypart in keyparts
+            }
+            keyparts['backend'] = keybackend
+            keyparts['name'] = keyname
+            keytagparams = []
+            for name, value in keyparts.items():
+                keytagparams.extend((
+                    '--tag-name', 'git-annex-key-' + name,
+                    '--tag-value', value
+                ))
+            keytagparams.extend((
+                    '--tag-name', 'IPFS-Add',
+                    '--tag-value', key,
+                    '--tag-name', 'git-annex-key',
+                    '--tag-value', key,
+            ))
+            output = self.arkb(
+                    'deploy',
+                    filename,
+                    *keytagparams,
+                    '--auto-confirm',
+                    *self.params_deploy
+            )
+            if 'Failed to deploy' in output:
+                raise RemoteError(output.replace('\n', ' '))
+            lines = output.split('\n')
+            self._debug('lines[-3] = ' + repr(lines[-3]))
+            self._debug('lines[-2] = ' + repr(lines[-2]))
+            self._debug('lines[-1] = ' + repr(lines[-1]))
+            txid = lines[-2].split('/')[-1]
+            for url in self.txid_urls(txid):
+                self.annex.seturlpresent(key, url)
+            for uri in self.txid_uris(txid):
+                self.annex.seturipresent(key, uri)
 
     def transfer_retrieve(self, key, local_file):
+        if self.combine_to and key in self.combining:
+            self.do_combine()
         last_exc = None
         for txid in self.txids(key):
             for url in self.txid_urls(txid):
@@ -119,7 +208,7 @@ class ArkbStorageRemote(SpecialRemote):
             for url in self.txid_tmpurls(txid):
                 try:
                     self.retrieve_url(url, local_file)
-                    self.annex.info(f'{key} stalled at {url}')
+                    self._info(f'{key} stalled at {url}')
                     return
                 except Exception as exc:
                     last_exc = exc
@@ -134,15 +223,20 @@ class ArkbStorageRemote(SpecialRemote):
                     file.write(chunk)
 
     def remove(self, key):
-        for url in self.txid_urls(txid):
-            self.annex.seturlmissing(key, url)
-        for uri in self.txid_uris(txid):
-            self.annex.seturimissing(key, uri)
-        return
+        if self.combine_to:
+            self.combined -= self.combining.pop(key, 0)
+
+        for txid in self.txids(key):
+            for url in self.txid_urls(txid):
+                self.annex.seturlmissing(key, url)
+            for uri in self.txid_uris(txid):
+                self.annex.seturimissing(key, uri)
 
     def txids(self, key):
         return [url.split('/',3)[-1] for url in self.annex.geturls(key, self.gateway + '/')]
     def checkpresent(self, key):
+        if self.combine_to and key in self.combining:
+            return True
         for txid in self.txids(key):
             for url in self.txid_urls(txid):
                 try:
@@ -153,7 +247,7 @@ class ArkbStorageRemote(SpecialRemote):
             for url in self.txid_tmpurls(txid):
                 try:
                     requests.head(url).raise_for_status()
-                    self.annex.info(f'{key} stalled at {url}')
+                    self._info(f'{key} stalled at {url}')
                     return True
                 except:
                     continue
@@ -190,7 +284,7 @@ class ArkbStorageRemote(SpecialRemote):
 
     def arkb(self, *params, input=None, backoff_secs=8):
         try:
-            self.annex.debug('arkb ' + ' '.join(params))
+            self._debug('arkb ' + ' '.join(params))
             result = subprocess.run(
                 (os.environ.get('ARKB', 'arkb'), *params),
                 env={'PATH':os.environ.get('PATH', ''), 'HOME':self.local_dir},
@@ -203,24 +297,24 @@ class ArkbStorageRemote(SpecialRemote):
             stdout = ansi_escape.sub('', result.stdout)
             stderr = ansi_escape.sub('', result.stderr)
             for line in stdout.split('\n'):
-                self.annex.debug(line[:80])
+                self._debug(line[:80])
             for line in stderr.split('\n'):
-                self.annex.debug(line[:80])
-            self.annex.debug('PROCESS SUCCESS arkb ' + ' '.join(params))
+                self._debug(line[:80])
+            self._debug('PROCESS SUCCESS arkb ' + ' '.join(params))
         except subprocess.CalledProcessError as err:
-            self.annex.info('err: arkb ' + ' '.join(params))
+            self._info('err: arkb ' + ' '.join(params))
             #if 'JSON.parse' in err.stderr or 'Too Many Requests' in err.stdout:
             #    delay = backoff_secs + backoff_secs * random.random()
-            #    self.annex.info(f'Waiting {int(delay+0.5)} seconds.')
+            #    self._info(f'Waiting {int(delay+0.5)} seconds.')
             #    for line in err.stdout.split('\n'):
-            #        self.annex.info(line)
+            #        self._info(line)
             #    for line in err.stderr.split('\n'):
-            #        self.annex.info(line)
+            #        self._info(line)
             #    time.sleep(delay)
-            #    self.annex.info(f'Done waiting for {int(delay+0.5)} seconds.')
+            #    self._info(f'Done waiting for {int(delay+0.5)} seconds.')
             #    return self.w3(*params, input=input, backoff_secs = delay)
             #elif 'EAI_AGAIN' in err.stderr:
-            #    self.annex.info(f'EAI_AGAIN')
+            #    self._info(f'EAI_AGAIN')
             #    return self.w3(*params, input=input, backoff_secs = backoff_secs)
 
             raise RemoteError((err.stdout + ' '  + err.stderr).replace('\n', ' '))
@@ -239,4 +333,7 @@ if __name__ == '__main__':
     main = Main()
     remote = ArkbStorageRemote(main)
     main.LinkRemote(remote)
-    main.Listen()
+    try:
+        main.Listen()
+    finally:
+        remote.finish()
