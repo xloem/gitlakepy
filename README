@@ -10,12 +10,14 @@ git-annex-remote-arkb-subprocess
   Eventual blockchain storage.
   https://github.com/Textury/arkb
 
+  Note: this does not yet use private credentials, so use a throwaway wallet if publicising the repository. The change to credential storage shouldn't be complicated, just update the wallet config code to use the git-annex credential calls.
+
   Usage:
   $ yarn global add arkb
-  $ git annex initremote arkb-direct type=external encryption=<type> externaltype=arkb-subprocess wallet=<wallet path>
+  $ git annex initremote arkb-direct type=external encryption=<type> externaltype=arkb-subprocess wallet=<wallet path> [combine-to-bytes=CHUNKBYTES] [subchunk-bytes=CHUNKBYTES]
 
   Free usage for 2022 <=100kb deal:
-  $ git annex initremote arkb-free chunk=100000 bundler=<bundler url> type=external encryption=<type> externaltype=arkb-subprocess wallet=<wallet path>
+  $ git annex initremote arkb-free subchunk-bytes=100000 bundler=<bundler url> type=external encryption=<type> externaltype=arkb-subprocess wallet=<wallet path>
 
 git-annex-remote-w3-subprocess
   https://web3.storage

@@ -2,10 +2,13 @@
 
 from annexremote import Master as Main, SpecialRemote, RemoteError, UnsupportedRequest
 
-import json, os, random, shutil, subprocess, time
+import json, os, random, shutil, subprocess, sys, time
 import re, requests
 
 ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+
+TXID_LEN = 43
+URI_PROTO = 'arkb-subprocess://'
 
 class ArkbStorageRemote(SpecialRemote):
     def __init__(self, annex):
@@ -15,6 +18,7 @@ class ArkbStorageRemote(SpecialRemote):
             'bundler': 'ANS-104 bundler node url',
             'gateway': 'Arweave gateway url',
             'combine-to-bytes': 'Consolidate uploads up to this many bytes',
+            'subchunk-bytes': 'Break uploads into subfiles of this many bytes',
         }
         self.local_dir = None
         self.closed = False
@@ -68,40 +72,71 @@ class ArkbStorageRemote(SpecialRemote):
         self.combine_to = self.annex.getconfig('combine-to-bytes')
         if self.combine_to == '' and self.bundler:
             self.combine_to = 100000 * 32
+        self.combining = {}
+        self.combined = 0
         if self.combine_to:
             self.combine_to = int(self.combine_to)
-            self.combining = {}
-            self.combined = 0
+        self.subchunk = self.annex.getconfig('subchunk-bytes')
+        if self.subchunk != '':
+            self.subchunk = int(self.subchunk)
+        if self.combine_to or self.subchunk:
+            if self.combine_to and self.subchunk and self.subchunk > self.combine_to:
+                raise RemoteError('unimplemented: subchunk-bytes > combine-to-bytes')
+                
             self.combining_dir = os.path.join(self.local_dir, str(os.getpid()))
             os.makedirs(self.combining_dir, exist_ok = True)
 
-    def do_combine(self):
+    def do_combine(self, tags_dict = {}, **tags):
         if len(self.combining) == 0:
             return
         index_filename = 'index.txt'
         with open(os.path.join(self.combining_dir, index_filename), 'wt') as index_file:
-            for key in self.combining:
-                index_file.write(key + '\n')
+            index_file.write('\n'.join(self.combining.keys()))
+        if tags:
+            tags_dict = tags_dict.copy()
+            tags_dict.update(tags)
+        keytagparams = []
+        for name, value in tags_dict.items():
+            keytagparams.extend((
+                '--tag-name', name,
+                '--tag-value', value
+            ))
         output = self.arkb(
             'deploy',
             self.combining_dir,
+            *keytagparams,
+            '--concurrency', str(5 if len(self.combining) < 5 else len(self.combining)),
             '--auto-confirm',
             '--index', index_filename,
             *self.params_deploy
         )
         if 'Failed to deploy' in output:
             raise RemoteError(output.replace('\n', ' '))
-        with open(os.path.join(self.combining_dir, 'manifest.arkb')) as manifest_file:
+        manifest_filename = os.path.join(self.combining_dir, 'manifest.arkb')
+        while not os.path.exists(manifest_filename):
+            for path in self.combining.keys():
+                manifest_filename = os.path.join(self.combining_dir, os.path.basename(path), 'manifest.arkb')
+        if not os.path.exists(manifest_filename):
+            self.combined = 0 # to quickly prevent cleanup during debugging
+            raise RemoteError(f'not found after deploy: {manifest_filename}')
+        lines = output.split('\n')
+        self._debug('lines[-3] = ' + repr(lines[-3]))
+        self._debug('lines[-2] = ' + repr(lines[-2]))
+        self._debug('lines[-1] = ' + repr(lines[-1]))
+        manifest_txid = lines[-2].split('/')[-1]
+        with open(manifest_filename) as manifest_file:
             manifest = json.load(manifest_file)
         key_urls = []
+        file_txids = {}
         for key, props in manifest['paths'].items():
             txid = props['id']
+            file_txids[key] = txid
             self._debug(f'{key}: {self.gateway}/{txid}')
-            if key in self.combining:
+            if self.combining.get(key, False):
                 for url in (*self.txid_urls(txid), *self.txid_uris(txid)):
                     key_urls.append((key, url))
         if self.closed:
-            key_urls = '\n'.join((' '.join(keyurl) for keyurl in keyurls))
+            key_urls = '\n'.join((' '.join(keyurl) for keyurl in key_urls))
             result = subprocess.run(
                 ('git', 'annex', 'registerurl', '--batch'),
                 input=keyurls,
@@ -121,14 +156,15 @@ class ArkbStorageRemote(SpecialRemote):
         os.makedirs(self.combining_dir)
         self.combined = 0
         self.combining = {}
-
+        return manifest_txid, file_txids
 
     def finish(self):
         self.closed = True
         self.tty = open('/dev/tty', 'wt')
-        if hasattr(self, 'combine_to') and self.combine_to:
-            if self.combined:
+        if (hasattr(self, 'combine_to') and self.combine_to):
+            if self.combined and any(self.combining.values()):
                 self.do_combine()
+        if (hasattr(self, 'combine_to') and self.combine_to) or (hasattr(self, 'subchunk') and self.subchunk):
             shutil.rmtree(self.combining_dir)
     def _info(self, txt):
         if self.closed:
@@ -151,8 +187,64 @@ class ArkbStorageRemote(SpecialRemote):
             newfilename = key #'c-' + str(len(self.combining))
             newfullpath = os.path.join(self.combining_dir, newfilename)
             os.rename(filename, newfullpath)
-            self.combining[key] = size#newfullpath#(newfilename, keytagparams)
+            self.combining[key] = True#size#newfullpath#(newfilename, keytagparams)
             self.combined += size
+        elif self.subchunk and size > self.subchunk:
+            new_subdir = key
+            new_fulldir = os.path.join(self.combining_dir, key); os.makedirs(new_fulldir, exist_ok=True)
+            progress = 0
+            with open(filename, 'rb') as file:
+                keytxids = {}
+                for offset in range(0, size, self.subchunk):
+                    newfilename = str(offset)
+                    data = file.read(self.subchunk)
+                    if self.combined + len(data) > self.combine_to:
+                        manifest_txid, file_txids = self.do_combine()
+                        keytxids.update(file_txids)
+                        self.annex.progress(progress)
+                        new_fulldir = os.path.join(self.combining_dir, key); os.makedirs(new_fulldir, exist_ok=True)
+                    progress += len(data)
+                    self.combined += len(data)
+                    self.combining[new_subdir + '/' + newfilename] = False
+                    with open(os.path.join(new_fulldir, newfilename), 'wb') as newfile:
+                        newfile.write(data)
+            keytxids.update(self.do_combine()[1])
+            txids = []
+            self._debug('keytxids: ' + repr(keytxids))
+            keytxids = [(*key.split('/',1), txid) for key, txid in keytxids.items() if '/' in key]
+            keytxids.sort(key=lambda item: int(item[1]))
+            txids = [txid for txkey, offset, txid in keytxids if txkey == key]
+            assert len(txids) > 0
+            
+            # so we'll probably have multiple index files
+            # in case there are many subchunks.
+            file_idx = 0
+            idx_file = None
+            for txid in txids:
+                if idx_file is None or idx_file_size + len(txid) + 1 > self.subchunk:
+                    if idx_file is not None:
+                        self.combined += idx_file_size
+                        idx_file.close()
+                    file_idx += 1
+                    idx_file = open(os.path.join(self.combining_dir, str(file_idx)), 'wt')
+                    self.combining[str(file_idx)] = False
+                    idx_file.write(txid)
+                    idx_file_size = len(txid)
+                else:
+                    idx_file.write('\n' + txid)
+                    idx_file_size += 1 + len(txid)
+            self.combined += idx_file_size
+            idx_file.close()
+
+            manifest_txid, file_txids = self.do_combine({
+                'application': 'git-annex-remote-arkb-subprocess',
+                'format': 'subchunk-txid-files',
+                'git-annex-key': key
+            })
+
+            self.annex.seturipresent(key, URI_PROTO + manifest_txid)
+
+            self.annex.progress(progress)
         else:
             keybackend, keyname = key.split('--')
             keybackend, *keyparts = keybackend.split('-')
@@ -216,11 +308,64 @@ class ArkbStorageRemote(SpecialRemote):
         raise last_exc
 
     def retrieve_url(self, url, local_file):
+        self._debug(f'retrieve_url({repr(url)}, {repr(local_file)}')
+        urlparts = url.split('/')
+        for idx, part in enumerate(urlparts):
+            if len(part) == TXID_LEN:
+                txidurlidx = idx
+                break
+        self._debug(f'txid = {urlparts[txidurlidx]}')
+
+        size = 0
+
         with requests.get(url, stream=True) as stream:
             stream.raise_for_status()
-            with open(local_file, 'wb') as file:
-                for chunk in stream.iter_content(chunk_size=8192):
-                    file.write(chunk)
+            # manifest from bundler node indicating folder
+            # or '/' trailing url from gateway indicating folder
+            # assume subchunk format, files containing txids to be concatenated
+            self._debug(f'Content-Type = {stream.headers["Content-Type"]}')
+            self._debug(f'url = {stream.url}')
+            if stream.headers['Content-Type'] == 'application/x.arweave-manifest+json' or stream.url[-1] == '/':
+                if stream.headers['Content-Type'] == 'application/x.arweave-manifest+json':
+                    manifest = stream.json()
+                    stream.close()
+                    assert manifest['manifest'] == 'arweave/paths'
+                    assert manifest['version'] == '0.1.0'
+                    filetxids = {key: value['id'] for key, value in manifest['paths']}
+                    index_file = manifest['index']
+                    urlparts[txidurlidx] = filetxids[index_file]
+                    stream = requests.get('/'.join(urlparts))
+                    stream.raise_for_status()
+                    subfiles = {}
+                    for subfile in stream.text.split('\n'):
+                        urlparts[txidurlidx] = filetxids[subfile]
+                        subfiles[subfile] = '/'.join(urlparts)
+                else:
+                    subfiles = {}
+                    subfilenames = stream.text.split('\n')
+                    stream.close()
+                    for subfile in subfilenames:
+                        subfiles[subfile] = url + '/' + subfile
+                with open(local_file, 'wb') as file:
+                    for url in subfiles.values():
+                        self._debug(url)
+                        response = requests.get(url)
+                        response.raise_for_status()
+                        for txid in response.text.split('\n'):
+                            urlparts[txidurlidx] = txid
+                            url = '/'.join(urlparts)
+                            self._debug(url)
+                            with requests.get(url, stream=True) as stream:
+                                for chunk in stream.iter_content(chunk_size=65536):
+                                    file.write(chunk)
+                                    size += len(chunk)
+                                    self.annex.progress(size)
+            else:
+                with open(local_file, 'wb') as file:
+                    for chunk in stream.iter_content(chunk_size=65536):
+                        file.write(chunk)
+                        size += len(chunk)
+                        self.annex.progress(size)
 
     def remove(self, key):
         if self.combine_to:
@@ -231,14 +376,15 @@ class ArkbStorageRemote(SpecialRemote):
                 self.annex.seturlmissing(key, url)
             for uri in self.txid_uris(txid):
                 self.annex.seturimissing(key, uri)
+            self.annex.seturimissing(key, URI_PROTO + txid)
 
     def txids(self, key):
-        return [url.split('/',3)[-1] for url in self.annex.geturls(key, self.gateway + '/')]
+        return [url.split('/',3)[-1] for url in (*self.annex.geturls(key, self.gateway + '/'), *self.annex.geturls(key, URI_PROTO))]
     def checkpresent(self, key):
         if self.combine_to and key in self.combining:
             return True
         for txid in self.txids(key):
-            for url in self.txid_urls(txid):
+            for url in (*self.txid_urls(txid), URI_PROTO + txid):
                 try:
                     requests.head(url).raise_for_status()
                     return True
@@ -282,7 +428,7 @@ class ArkbStorageRemote(SpecialRemote):
     #        cid = item['cid']
     #        return ' '.join((self.cid_uris(cid)))
 
-    def arkb(self, *params, input=None, backoff_secs=8):
+    def arkb(self, *params, input=None, backoff_secs=8, retries=10):
         try:
             self._debug('arkb ' + ' '.join(params))
             result = subprocess.run(
@@ -302,7 +448,16 @@ class ArkbStorageRemote(SpecialRemote):
                 self._debug(line[:80])
             self._debug('PROCESS SUCCESS arkb ' + ' '.join(params))
         except subprocess.CalledProcessError as err:
-            self._info('err: arkb ' + ' '.join(params))
+            #self.confirmed = 0 # don't clean up state
+            self._info('err: arkb ' + ' '.join(params) + repr(err))
+            stdout = ansi_escape.sub('', err.stdout)
+            stderr = ansi_escape.sub('', err.stderr)
+            for line in stdout.split('\n'):
+                self._info(line[:80])
+            for line in stderr.split('\n'):
+                self._info(line[:80])
+            if retries:
+                return self.arkb(*params, input=input, backoff_secs=backoff_secs, retries=retries-1)
             #if 'JSON.parse' in err.stderr or 'Too Many Requests' in err.stdout:
             #    delay = backoff_secs + backoff_secs * random.random()
             #    self._info(f'Waiting {int(delay+0.5)} seconds.')
