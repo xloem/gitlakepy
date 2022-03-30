@@ -433,7 +433,7 @@ class ArkbStorageRemote(SpecialRemote):
             self._debug('arkb ' + ' '.join(params))
             result = subprocess.run(
                 (os.environ.get('ARKB', 'arkb'), *params),
-                env={'PATH':os.environ.get('PATH', ''), 'HOME':self.local_dir},
+                env={**os.environ, 'HOME':self.local_dir},
                 input=input,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
