@@ -15,7 +15,7 @@ setup(name='gitlake',
           'scripts/git-annex-remote-arkb-subprocess',
           'scripts/git-remote-arkb-subprocess',
           'scripts/git-annex-remote-w3-subprocess',
-          'scripts/git-annex-remote-w3-hybrid'
+#          'scripts/git-annex-remote-w3-hybrid'
       ],
       install_requires=['siaskynet', 'polyglot-bitcoin', 'annexremote', 'flock', 'bitcoinx'],
 )
