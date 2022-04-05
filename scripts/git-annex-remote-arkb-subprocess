@@ -186,7 +186,10 @@ class ArkbStorageRemote(SpecialRemote):
                 self.do_combine()
             newfilename = key #'c-' + str(len(self.combining))
             newfullpath = os.path.join(self.combining_dir, newfilename)
-            os.rename(filename, newfullpath)
+            try:
+                os.rename(filename, newfullpath)
+            except:
+                shutil.copyfile(filename, newfullpath)
             self.combining[key] = True#size#newfullpath#(newfilename, keytagparams)
             self.combined += size
         elif self.subchunk and size > self.subchunk:
