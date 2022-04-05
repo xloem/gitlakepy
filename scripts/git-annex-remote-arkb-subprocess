@@ -30,13 +30,14 @@ class ArkbStorageRemote(SpecialRemote):
         wallet = self.annex.getconfig('wallet')
         #token = self.annex.getcreds('token')['password']
         if wallet == '':
-            raise RemoteError('wallet is required')
-        try:
-            with open(wallet, 'rt') as wf:
-                wallet = wf.read()
-            self.annex.setconfig('wallet', wallet.replace('\n', ' '))
-        except:
-            pass
+            self._info('Warning: no wallet specified. Only subsidised uploads will work.')
+        else:
+            try:
+                with open(wallet, 'rt') as wf:
+                    wallet = wf.read()
+                self.annex.setconfig('wallet', wallet.replace('\n', ' '))
+            except:
+                pass
 
         #self.w3('token', input=token+'\n')
         self.prepare()
@@ -46,21 +47,25 @@ class ArkbStorageRemote(SpecialRemote):
         # prepare to be used for transfers, e.g. open connection
         self.local_dir = os.path.join(self.annex.getgitdir(), self.__class__.__name__, self.annex.getuuid())
         os.makedirs(self.local_dir, exist_ok=True)
-        self.wallet_path = os.path.join(self.local_dir, 'wallet.json')
-        try:
-            with open(self.wallet_path, 'rt') as wallet_file:
-                wallet = wallet_file.read()
-            assert wallet == self.annex.getconfig('wallet')
-        except:
-            tmp_wallet_path = self.wallet_path + '.tmp'
-            with open(tmp_wallet_path, 'wt') as wallet_file:
-                wallet_file.write(self.annex.getconfig('wallet'))
-            os.chmod(tmp_wallet_path, 0o400)
-            os.rename(tmp_wallet_path, self.wallet_path)
+        if self.annex.getconfig('wallet') != '':
+            self.wallet_path = os.path.join(self.local_dir, 'wallet.json')
+            try:
+                with open(self.wallet_path, 'rt') as wallet_file:
+                    wallet = wallet_file.read()
+                assert wallet == self.annex.getconfig('wallet')
+            except:
+                tmp_wallet_path = self.wallet_path + '.tmp'
+                with open(tmp_wallet_path, 'wt') as wallet_file:
+                    wallet_file.write(self.annex.getconfig('wallet'))
+                os.chmod(tmp_wallet_path, 0o400)
+                os.rename(tmp_wallet_path, self.wallet_path)
+            self.params_deploy = ('--wallet', self.wallet_path, '--no-colors')
+        else:
+            self.wallet_path = ''
+            self.params_deploy = ('--no-colors',)
 
         self._info('arkb ' + self.arkb('version').strip())
 
-        self.params_deploy = ('--wallet', self.wallet_path, '--no-colors')
         self.bundler = self.annex.getconfig('bundler')
         if self.bundler:
             self.params_deploy = (*self.params_deploy, '--use-bundler', self.bundler)
@@ -435,7 +440,7 @@ class ArkbStorageRemote(SpecialRemote):
         try:
             self._debug('arkb ' + ' '.join(params))
             result = subprocess.run(
-                (os.environ.get('ARKB', 'arkb'), *params),
+                (*os.environ.get('ARKB', 'arkb').split(' '), *params),
                 env={**os.environ, 'HOME':self.local_dir},
                 input=input,
                 stdout=subprocess.PIPE,
