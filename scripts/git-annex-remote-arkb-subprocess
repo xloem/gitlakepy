@@ -186,18 +186,7 @@ class ArkbStorageRemote(SpecialRemote):
         with open(filename, 'rb') as file:
             file.seek(0, os.SEEK_END)
             size = file.tell()
-        if self.combine_to and size < self.combine_to:
-            if self.combined + size > self.combine_to:
-                self.do_combine()
-            newfilename = key #'c-' + str(len(self.combining))
-            newfullpath = os.path.join(self.combining_dir, newfilename)
-            try:
-                os.rename(filename, newfullpath)
-            except:
-                shutil.copyfile(filename, newfullpath)
-            self.combining[key] = True#size#newfullpath#(newfilename, keytagparams)
-            self.combined += size
-        elif self.subchunk and size > self.subchunk:
+        if self.subchunk and size > self.subchunk:
             new_subdir = key
             new_fulldir = os.path.join(self.combining_dir, key); os.makedirs(new_fulldir, exist_ok=True)
             progress = 0
@@ -253,6 +242,17 @@ class ArkbStorageRemote(SpecialRemote):
             self.annex.seturipresent(key, URI_PROTO + manifest_txid)
 
             self.annex.progress(progress)
+        elif self.combine_to and size < self.combine_to:
+            if self.combined + size > self.combine_to:
+                self.do_combine()
+            newfilename = key #'c-' + str(len(self.combining))
+            newfullpath = os.path.join(self.combining_dir, newfilename)
+            try:
+                os.rename(filename, newfullpath)
+            except:
+                shutil.copyfile(filename, newfullpath)
+            self.combining[key] = True#size#newfullpath#(newfilename, keytagparams)
+            self.combined += size
         else:
             keybackend, keyname = key.split('--')
             keybackend, *keyparts = keybackend.split('-')
