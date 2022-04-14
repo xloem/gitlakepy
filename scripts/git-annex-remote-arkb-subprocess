@@ -456,22 +456,21 @@ class ArkbStorageRemote(SpecialRemote):
                 self._info(line[:80])
             for line in stderr.split('\n'):
                 self._info(line[:80])
-            if retries:
+            if 'toJSON' in (stdout + stderr):# or 'Too Many Requests' in err.stdout:
+                delay = backoff_secs + backoff_secs * random.random()
+                self._info(f'Waiting {int(delay+0.5)} seconds.')
+                for line in err.stdout.split('\n'):
+                    self._info(line)
+                for line in err.stderr.split('\n'):
+                    self._info(line)
+                time.sleep(delay)
+                self._info(f'Done waiting for {int(delay+0.5)} seconds.')
+                return self.arkb(*params, input=input, backoff_secs = delay, retries=retries)
+            elif 'EAI_AGAIN' in (stdout + stderr):
+                self._info(f'EAI_AGAIN')
+                return self.w3(*params, input=input, backoff_secs = backoff_secs,retries=retries)
+            elif retries:
                 return self.arkb(*params, input=input, backoff_secs=backoff_secs, retries=retries-1)
-            #if 'JSON.parse' in err.stderr or 'Too Many Requests' in err.stdout:
-            #    delay = backoff_secs + backoff_secs * random.random()
-            #    self._info(f'Waiting {int(delay+0.5)} seconds.')
-            #    for line in err.stdout.split('\n'):
-            #        self._info(line)
-            #    for line in err.stderr.split('\n'):
-            #        self._info(line)
-            #    time.sleep(delay)
-            #    self._info(f'Done waiting for {int(delay+0.5)} seconds.')
-            #    return self.w3(*params, input=input, backoff_secs = delay)
-            #elif 'EAI_AGAIN' in err.stderr:
-            #    self._info(f'EAI_AGAIN')
-            #    return self.w3(*params, input=input, backoff_secs = backoff_secs)
-
             raise RemoteError((err.stdout + ' '  + err.stderr).replace('\n', ' '))
         return stdout
     #def setup(self):
