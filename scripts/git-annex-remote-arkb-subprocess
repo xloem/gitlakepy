@@ -2,6 +2,7 @@
 
 from annexremote import Master as Main, SpecialRemote, RemoteError, UnsupportedRequest
 
+import concurrent.futures
 import json, os, random, shutil, subprocess, sys, time
 import re, requests
 
@@ -294,7 +295,7 @@ class ArkbStorageRemote(SpecialRemote):
     def transfer_retrieve(self, key, local_file):
         if self.combine_to and key in self.combining:
             self.do_combine()
-        last_exc = None
+        last_exc = RemoteError('Logic error? No urls stored for key ' + key)
         for txid in self.txids(key):
             for url in self.txid_urls(txid):
                 try:
@@ -352,17 +353,25 @@ class ArkbStorageRemote(SpecialRemote):
                     stream.close()
                     for subfile in subfilenames:
                         subfiles[subfile] = url + '/' + subfile
+                def get_stream(url):
+                    return requests.get(url, stream=True)
                 with open(local_file, 'wb') as file:
-                    for url in subfiles.values():
+                    for response in concurrent.futures.ThreadPoolExecutor(max_workers=100).map(requests.get, subfiles.values()):
+                        url = response.url
                         self._debug(url)
                         response = requests.get(url)
                         response.raise_for_status()
+                        urls = []
                         for txid in response.text.split('\n'):
                             urlparts[txidurlidx] = txid
                             url = '/'.join(urlparts)
+                            urls.append(url)
+                        for inner_response in concurrent.futures.ThreadPoolExecutor(max_workers=100).map(get_stream, urls):
+                            url = inner_response.url
                             self._debug(url)
-                            with requests.get(url, stream=True) as stream:
-                                for chunk in stream.iter_content(chunk_size=65536):
+                            #with requests.get(url, stream=True) as stream:
+                            with inner_response as stream:
+                                for chunk in stream.iter_content(chunk_size=1024*1024):
                                     file.write(chunk)
                                     size += len(chunk)
                                     self.annex.progress(size)
