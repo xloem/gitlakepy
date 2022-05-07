@@ -115,8 +115,6 @@ class ArkbStorageRemote(SpecialRemote):
             '--index', index_filename,
             *self.params_deploy
         )
-        if 'Failed to deploy' in output:
-            raise RemoteError(output.replace('\n', ' '))
         manifest_filename = os.path.join(self.combining_dir, 'manifest.arkb')
         while not os.path.exists(manifest_filename):
             for path in self.combining.keys():
@@ -439,8 +437,9 @@ class ArkbStorageRemote(SpecialRemote):
     def arkb(self, *params, input=None, backoff_secs=8, retries=10):
         try:
             self._debug('arkb ' + ' '.join(params))
+            cmd = [*os.environ.get('ARKB', 'arkb').split(' '), *params]
             result = subprocess.run(
-                (*os.environ.get('ARKB', 'arkb').split(' '), *params),
+                cmd,
                 env={**os.environ, 'HOME':self.local_dir},
                 input=input,
                 stdout=subprocess.PIPE,
@@ -449,6 +448,8 @@ class ArkbStorageRemote(SpecialRemote):
                 text=True
             )
             stdout = ansi_escape.sub('', result.stdout)
+            if 'Failed to deploy' in stdout:
+                raise subprocess.CalledProcessError(0, cmd[0], stdout=result.stoudt, stderr=result.stderr)
             stderr = ansi_escape.sub('', result.stderr)
             for line in stdout.split('\n'):
                 self._debug(line[:80])
@@ -464,7 +465,7 @@ class ArkbStorageRemote(SpecialRemote):
                 self._info(line[:80])
             for line in stderr.split('\n'):
                 self._info(line[:80])
-            if 'toJSON' in (stdout + stderr):# or 'Too Many Requests' in err.stdout:
+            if retries and 'toJSON' in (stdout + stderr):# or 'Too Many Requests' in err.stdout:
                 delay = backoff_secs + backoff_secs * random.random()
                 self._info(f'Waiting {int(delay+0.5)} seconds.')
                 for line in err.stdout.split('\n'):
@@ -473,7 +474,7 @@ class ArkbStorageRemote(SpecialRemote):
                     self._info(line)
                 time.sleep(delay)
                 self._info(f'Done waiting for {int(delay+0.5)} seconds.')
-                return self.arkb(*params, input=input, backoff_secs = delay, retries=retries)
+                return self.arkb(*params, input=input, backoff_secs = delay, retries=retries-1)
             elif 'EAI_AGAIN' in (stdout + stderr):
                 self._info(f'EAI_AGAIN')
                 return self.w3(*params, input=input, backoff_secs = backoff_secs,retries=retries)
