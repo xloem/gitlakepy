@@ -117,9 +117,12 @@ class ArkbStorageRemote(SpecialRemote):
             *self.params_deploy
         )
         manifest_filename = os.path.join(self.combining_dir, 'manifest.arkb')
-        while not os.path.exists(manifest_filename):
+        if not os.path.exists(manifest_filename):
             for path in self.combining.keys():
                 manifest_filename = os.path.join(self.combining_dir, os.path.basename(path), 'manifest.arkb')
+                if os.path.exists(manifest_filename):
+                    manifest_filename = os.path.join(self.combining_dir, 'manifest.arkb')
+                    break
         if not os.path.exists(manifest_filename):
             self.combined = 0 # to quickly prevent cleanup during debugging
             raise RemoteError(f'not found after deploy: {manifest_filename}')
@@ -356,7 +359,7 @@ class ArkbStorageRemote(SpecialRemote):
                 def get_stream(url):
                     return requests.get(url, stream=True)
                 with open(local_file, 'wb') as file:
-                    for response in concurrent.futures.ThreadPoolExecutor(max_workers=100).map(requests.get, subfiles.values()):
+                    for response in concurrent.futures.ThreadPoolExecutor(max_workers=len(subfiles)).map(requests.get, subfiles.values()):
                         url = response.url
                         self._debug(url)
                         response = requests.get(url)
@@ -366,7 +369,7 @@ class ArkbStorageRemote(SpecialRemote):
                             urlparts[txidurlidx] = txid
                             url = '/'.join(urlparts)
                             urls.append(url)
-                        for inner_response in concurrent.futures.ThreadPoolExecutor(max_workers=100).map(get_stream, urls):
+                        for inner_response in concurrent.futures.ThreadPoolExecutor(max_workers=5).map(get_stream, urls):
                             url = inner_response.url
                             self._debug(url)
                             #with requests.get(url, stream=True) as stream:
@@ -375,6 +378,7 @@ class ArkbStorageRemote(SpecialRemote):
                                     file.write(chunk)
                                     size += len(chunk)
                                     self.annex.progress(size)
+                        #self.annex.progress(size)
             else:
                 with open(local_file, 'wb') as file:
                     for chunk in stream.iter_content(chunk_size=65536):
