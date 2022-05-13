@@ -20,6 +20,7 @@ class ArkbStorageRemote(SpecialRemote):
             'gateway': 'Arweave gateway url',
             'combine-to-bytes': 'Consolidate uploads up to this many bytes',
             'subchunk-bytes': 'Break uploads into subfiles of this many bytes',
+            'timeout': 'Network timeout in seconds',
         }
         self.local_dir = None
         self.closed = False
@@ -75,6 +76,11 @@ class ArkbStorageRemote(SpecialRemote):
             self.gateway = 'https://arweave.net'
         else:
             self.params_deploy = (*self.params_deploy,'--gateway', self.gateway)
+        self.timeout = self.annex.getconfig('timeout')
+        if not self.timeout:
+            self.timeout = 1000 * 60 * 60
+        self.params_deploy = (*self.params_deploy,'--timeout', self.timeout * 1000)
+
         self.combine_to = self.annex.getconfig('combine-to-bytes')
         if self.combine_to == '' and self.bundler:
             self.combine_to = 100000 * 32
@@ -315,7 +321,7 @@ class ArkbStorageRemote(SpecialRemote):
                 except Exception as exc:
                     last_exc = exc
                     continue
-        raise last_exc
+        raise RemoteError('retrieve_url: ' + str(last_exc))
 
     def retrieve_url(self, url, local_file):
         self._debug(f'retrieve_url({repr(url)}, {repr(local_file)}')
