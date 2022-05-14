@@ -38,7 +38,7 @@ do
 	ALTERNATES_DEPTH=0
 
 	TXID_LEN=$(($(echo "$txid" | wc -c)))
-	if $((TXID_LEN > LONGEST_TXID))
+	if (( TXID_LEN > LONGEST_TXID ))
 	then
 		LONGEST_TXID="$TXID_LEN"
 	fi
