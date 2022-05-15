@@ -29,12 +29,14 @@ do
 		touch alternates-0
 		ALTERNATES_DEPTH=1
 	fi
-	arkb deploy "$dir" -v --no-colors --concurrency 256 --auto-confirm --use-bundler https://node2.bundlr.network --timeout $((60*60*1000)) --tag-name Type --tag-value git-object-store | tee ../"$dir".arkb.log || exit -1
+	if ! arkb deploy "$dir" -v --no-colors --concurrency 256 --auto-confirm --use-bundler https://node2.bundlr.network --timeout $((60*60*1000)) --tag-name Type --tag-value git-object-store | tee ../"$dir".arkb.log; then exit -1; fi
 	txid="$(tail -n 1 ../"$dir".arkb.log | cut -d '/' -f 4)"
-	mv "$dir" "../$txid" || exit -1
-	echo "../../$txid" >> alternates-$((ALTERNATES_DEPTH))
+	if ! curl -v https://arweave.net/"$txid"; then exit -1; fi
+	if ! mv "$dir" "../$txid"; then exit -1; fi
+	rm ../"$txid"/*/manifest.arkb
+	echo "../$txid" >> alternates-$((ALTERNATES_DEPTH))
 	{ cd ../$txid; find -type f; } | { cd objects; xargs rm -vrf; }
-	cp alternates-$((ALTERNATES_DEPTH)) objects/info/alternates
+	sed 's!^!../!' alternates-$((ALTERNATES_DEPTH)) > objects/info/alternates
 	ALTERNATES_DEPTH=0
 
 	TXID_LEN=$(($(echo "$txid" | wc -c)))
@@ -43,6 +45,12 @@ do
 		LONGEST_TXID="$TXID_LEN"
 	fi
 done
+
 cat alternates-* > objects/info/alternates
 
-arkb deploy . -v --concurrency 256 --auto-confirm --use-bundler https://node2.bundlr.network --timeout $((60*60*1000)) --tag-name Type --tag-value git-dir | tee ../git.arkb.log || exit -1
+rm -rf git-dir 2>/dev/null
+mkdir git-dir
+cp -va description config info refs HEAD packed-refs objects   git-dir/
+
+if ! arkb deploy git-dir -v --concurrency 256 --auto-confirm --use-bundler https://node2.bundlr.network --timeout $((60*60*1000)) --tag-name Type --tag-value git-dir | tee ../git.arkb.log; then exit -1; fi
+rm -rf git-dir
