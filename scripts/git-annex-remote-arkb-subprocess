@@ -47,7 +47,8 @@ class ArkbStorageRemote(SpecialRemote):
 
     def prepare(self):
         # prepare to be used for transfers, e.g. open connection
-        self.local_dir = os.path.join(self.annex.getgitdir(), self.__class__.__name__, self.annex.getuuid())
+        self.uuid = self.annex.getuuid()
+        self.local_dir = os.path.join(self.annex.getgitdir(), self.__class__.__name__, self.uuid)
         os.makedirs(self.local_dir, exist_ok=True)
         if self.annex.getconfig('wallet') != '':
             self.wallet_path = os.path.join(self.local_dir, 'wallet.json')
@@ -78,19 +79,28 @@ class ArkbStorageRemote(SpecialRemote):
             self.params_deploy = (*self.params_deploy,'--gateway', self.gateway)
         self.timeout = self.annex.getconfig('timeout')
         if not self.timeout:
-            self.timeout = 1000 * 60 * 60
-        self.params_deploy = (*self.params_deploy,'--timeout', self.timeout * 1000)
+            self.timeout = str(2147483646 / 1000)
+        self.params_deploy = (*self.params_deploy,'--timeout', str(int(float(self.timeout) * 1000)))
 
         self.combine_to = self.annex.getconfig('combine-to-bytes')
         if self.combine_to == '' and self.bundler:
             self.combine_to = 100000 * 32
         self.combining = {}
         self.combined = 0
+        self.combined_pathnames = 0
         if self.combine_to:
             self.combine_to = int(self.combine_to)
         self.subchunk = self.annex.getconfig('subchunk-bytes')
         if self.subchunk != '':
             self.subchunk = int(self.subchunk)
+        self.urlqueue_dir = os.path.join(self.local_dir, 'urlqueue')
+        os.makedirs(self.urlqueue_dir, exist_ok = True)
+        for file in os.listdir(self.urlqueue_dir):
+            with open(file, 'rt') as fh:
+                for line in fh:
+                    key, url = line.split(' ', 1)
+                    self.annex.seturlpresent(key, url)
+            os.unlink(file)
         if self.combine_to or self.subchunk:
             if self.combine_to and self.subchunk and self.subchunk > self.combine_to:
                 raise RemoteError('unimplemented: subchunk-bytes > combine-to-bytes')
@@ -131,6 +141,7 @@ class ArkbStorageRemote(SpecialRemote):
                     break
         if not os.path.exists(manifest_filename):
             self.combined = 0 # to quickly prevent cleanup during debugging
+            self.combined_pathnames = 0
             raise RemoteError(f'not found after deploy: {manifest_filename}')
         lines = output.split('\n')
         self._debug('lines[-3] = ' + repr(lines[-3]))
@@ -150,8 +161,12 @@ class ArkbStorageRemote(SpecialRemote):
                     key_urls.append((key, url))
         if self.closed:
             key_urls = '\n'.join((' '.join(keyurl) for keyurl in key_urls))
+            urlqueue_fn = str(os.getpid()) + '.urls'
+            with open(os.path.join(self.local_dir, urlqueue_fn), 'wt') as fh:
+                fh.write(key_urls)
+            os.rename(os.path.join(self.local_dir, urlqueue_fn), os.path.join(self.urlqueue_dir, urlqueue_fn))
             result = subprocess.run(
-                ('git', 'annex', 'registerurl', '--batch'),
+                ('git', 'annex', 'enableremote', self.uuid),
                 input=keyurls,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -168,6 +183,7 @@ class ArkbStorageRemote(SpecialRemote):
         shutil.rmtree(self.combining_dir)
         os.makedirs(self.combining_dir)
         self.combined = 0
+        self.combined_pathnames = 0
         self.combining = {}
         return manifest_txid, file_txids
 
@@ -203,13 +219,14 @@ class ArkbStorageRemote(SpecialRemote):
                 for offset in range(0, size, self.subchunk):
                     newfilename = str(offset)
                     data = file.read(self.subchunk)
-                    if self.combined + len(data) > self.combine_to:
+                    if self.combined + len(data) > self.combine_to or (self.combined_pathnames + len(newfilename)) * 56 + 77 + len('index.txt') > self.subchunk:
                         manifest_txid, file_txids = self.do_combine()
                         keytxids.update(file_txids)
                         self.annex.progress(progress)
                         new_fulldir = os.path.join(self.combining_dir, key); os.makedirs(new_fulldir, exist_ok=True)
                     progress += len(data)
                     self.combined += len(data)
+                    self.combined_pathnames += len(os.path.join(key, newfilename))
                     self.combining[new_subdir + '/' + newfilename] = False
                     with open(os.path.join(new_fulldir, newfilename), 'wb') as newfile:
                         newfile.write(data)
@@ -232,6 +249,7 @@ class ArkbStorageRemote(SpecialRemote):
                         idx_file.close()
                     file_idx += 1
                     idx_file = open(os.path.join(self.combining_dir, str(file_idx)), 'wt')
+                    self.combined_pathnames += len(str(file_idx))
                     self.combining[str(file_idx)] = False
                     idx_file.write(txid)
                     idx_file_size = len(txid)
@@ -261,6 +279,7 @@ class ArkbStorageRemote(SpecialRemote):
                 shutil.copyfile(filename, newfullpath)
             self.combining[key] = True#size#newfullpath#(newfilename, keytagparams)
             self.combined += size
+            self.combined_pathnames += len(newfilename)
         else:
             keybackend, keyname = key.split('--')
             keybackend, *keyparts = keybackend.split('-')
@@ -455,7 +474,7 @@ class ArkbStorageRemote(SpecialRemote):
 
     def arkb(self, *params, input=None, backoff_secs=8, retries=10):
         try:
-            self._debug('arkb ' + ' '.join(params))
+            self._debug('arkb ' + ' '.join((str(param) for param in params)))
             cmd = [*os.environ.get('ARKB', 'arkb').split(' '), *params]
             result = subprocess.run(
                 cmd,
