@@ -51,7 +51,7 @@ do
 	then
 		exit -1
 	fi
-	if ! curl -v https://arweave.net/"$txid"; then exit -1; fi
+	if ! curl --fail --location --head --verbose https://arweave.net/"$txid"; then exit -1; fi
 	if ! mv "$dir" ../"$txid"; then exit -1; fi
 	rm -rf "$dir"
 	rm ../"$txid"/*/*/manifest.arkb
