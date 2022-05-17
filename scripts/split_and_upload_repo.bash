@@ -25,6 +25,7 @@ do
 	if ((NEXT_SIZE >= MAXFILESIZE))
 	then
 		cat alternates-* > "$dir"/info/alternates
+		sed 's!^!../!' alternates-* > objects/info/alternates
 		rm alternates-*
 		touch alternates-0
 		ALTERNATES_DEPTH=1
