@@ -490,7 +490,7 @@ class ArkbStorageRemote(SpecialRemote):
             )
             stdout = ansi_escape.sub('', result.stdout)
             if 'Failed to deploy' in stdout:
-                raise subprocess.CalledProcessError(0, cmd[0], stdout=result.stoudt, stderr=result.stderr)
+                raise subprocess.CalledProcessError(0, cmd[0], stdout=result.stdout, stderr=result.stderr)
             stderr = ansi_escape.sub('', result.stderr)
             for line in stdout.split('\n'):
                 self._debug(line[:80])
