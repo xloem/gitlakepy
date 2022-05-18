@@ -1,6 +1,6 @@
 MAXFILESIZE=100000
 MAXFILECOUNT=824
-CONCURRENCY=$((MAXFILECOUNT))
+CONCURRENCY=64 #$((MAXFILECOUNT))
 
 # unpack all packfiles
 mv objects/pack/* . 2>/dev/null &&
@@ -12,11 +12,20 @@ if [ "x$WALLET" != "x" ]
 then
 	WALLET="--wallet=$WALLET"
 fi
+if [ "x$GATEWAY" != "x" ]
+then
+	GATEWAY="--gateway=$GATEWAY"
+fi
+if [ "x$DEBUG" != "x" ]
+then
+	DEBUG="--debug"
+fi
 
 # make small object stores, can use dirsplit
 prefix="$(date --iso=seconds)"
 mkdir -p arweave
 if ! cd arweave ; then exit -1; fi
+rm -rf alt-*
 if ! dirsplit -L --accuracy 1 --prefix "alt-$prefix-" --blksize $((MAXFILESIZE)) --size=$(((MAXFILECOUNT-1) * MAXFILESIZE)) ../objects
 then
 	exit -1
@@ -52,7 +61,7 @@ do
 	echo git-object-store > "$dir"/git-object-store
 	while true
 	do
-		if ! arkb $WALLET deploy "$dir" --index git-object-store -v --no-colors --concurrency "$CONCURRENCY" --auto-confirm --use-bundler https://node2.bundlr.network --timeout $((60*60*1000)) --tag-name Type --tag-value git-object-store | tee "$dir".arkb.log; then exit -1; fi
+		if ! arkb deploy "$dir" $GATEWAY $WALLET $DEBUG --index git-object-store -v --no-colors --concurrency "$CONCURRENCY" --auto-confirm --use-bundler https://node2.bundlr.network --tag-name Type --tag-value git-object-store | tee "$dir".arkb.log; then exit -1; fi
 		if ! grep "timeout of 100000ms exceeded" "$dir".arkb.log
 		then
 			break
@@ -82,5 +91,5 @@ rm -rf arweave/git-dir 2>/dev/null
 mkdir arweave/git-dir
 cp -va description config info refs HEAD packed-refs objects   arweave/git-dir/
 
-if ! arkb $WALLET deploy arweave/git-dir -v --index HEAD --concurrency "$CONCURRENCY" --auto-confirm --use-bundler https://node2.bundlr.network --timeout $((60*60*1000)) --tag-name Type --tag-value git-dir | tee arweave/git-dir-$(date --iso=seconds).arkb.log; then exit -1; fi
+if ! arkb deploy arweave/git-dir $DEBUG $GATEWAY $WALLET -v --index HEAD --concurrency "$CONCURRENCY" --auto-confirm --use-bundler https://node2.bundlr.network --timeout $((60*60*1000)) --tag-name Type --tag-value git-dir | tee arweave/git-dir-$(date --iso=seconds).arkb.log; then exit -1; fi
 rm -rf git-dir
