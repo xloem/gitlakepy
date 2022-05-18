@@ -1,6 +1,6 @@
 MAXFILESIZE=100000
 MAXFILECOUNT=824
-CONCURRENCY=64 #$((MAXFILECOUNT))
+CONCURRENCY=32 #$((MAXFILECOUNT))
 
 # unpack all packfiles
 mv objects/pack/* . 2>/dev/null &&
