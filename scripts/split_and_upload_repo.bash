@@ -46,7 +46,7 @@ do
 	if ((NEXT_SIZE >= MAXFILESIZE))
 	then
 		cat arweave/alternates-* > "$dir"/info/alternates
-		sed 's!^\.\.!&/arweave!' arweave/alternates-* > objects/info/alternates
+		sed 's!^\.\./\.\.!../arweave!' arweave/alternates-* > objects/info/alternates
 		rm arweave/alternates-*
 		touch arweave/alternates-0
 		ALTERNATES_DEPTH=1
@@ -79,17 +79,19 @@ do
 	if ! mv "$dir" arweave/"$txid"; then exit -1; fi
 	rm -rf "$dir"
 	rm arweave/"$txid"/*/*/manifest.arkb
-	echo "../$txid/objects" >> alternates-$((ALTERNATES_DEPTH))
+	echo "../../$txid/objects" >> arweave/alternates-$((ALTERNATES_DEPTH))
 	{ cd arweave/$txid/; find -type f; } | xargs rm -vrf
-	sed 's!^\.\.!&/arweave!' alternates-$((ALTERNATES_DEPTH)) > objects/info/alternates
+	sed 's!^\.\./\.\.!../arweave!' arweave/alternates-$((ALTERNATES_DEPTH)) > objects/info/alternates
 	ALTERNATES_DEPTH=0
 done
 
-sed 's!^\.\.!&/arweave!' alternates-* > objects/info/alternates
+sed 's!^\.\./\.\.!../arweave!' arweave/alternates-* > objects/info/alternates
 
 rm -rf arweave/git-dir 2>/dev/null
 mkdir arweave/git-dir
 cp -va description config info refs HEAD packed-refs objects   arweave/git-dir/
+cat arweave/alternates-* > arweave/git-dir/objects/info/alternates
+{ cd arweave/git-dir; git update-server-info; }
 
 if ! arkb deploy arweave/git-dir $DEBUG $GATEWAY $WALLET -v --index HEAD --concurrency "$CONCURRENCY" --auto-confirm --use-bundler https://node2.bundlr.network --timeout $((60*60*1000)) --tag-name Type --tag-value git-dir | tee arweave/git-dir-$(date --iso=seconds).arkb.log; then exit -1; fi
 rm -rf git-dir
