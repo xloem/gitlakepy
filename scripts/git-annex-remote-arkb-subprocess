@@ -94,13 +94,15 @@ class ArkbStorageRemote(SpecialRemote):
         if self.subchunk != '':
             self.subchunk = int(self.subchunk)
         self.urlqueue_dir = os.path.join(self.local_dir, 'urlqueue')
-        os.makedirs(self.urlqueue_dir, exist_ok = True)
-        for file in os.listdir(self.urlqueue_dir):
-            with open(file, 'rt') as fh:
-                for line in fh:
-                    key, url = line.split(' ', 1)
-                    self.annex.seturlpresent(key, url)
-            os.unlink(file)
+        try:
+            for file in os.listdir(self.urlqueue_dir):
+                with open(os.path.join(self.urlqueue_dir, file), 'rt') as fh:
+                    for line in fh:
+                        key, url = line.rstrip().split(' ', 1)
+                        self.annex.seturlpresent(key, url)
+                os.unlink(file)
+        except FileNotFoundError:
+            pass
         if self.combine_to or self.subchunk:
             if self.combine_to and self.subchunk and self.subchunk > self.combine_to:
                 raise RemoteError('unimplemented: subchunk-bytes > combine-to-bytes')
@@ -160,13 +162,14 @@ class ArkbStorageRemote(SpecialRemote):
                 for url in (*self.txid_urls(txid), *self.txid_uris(txid)):
                     key_urls.append((key, url))
         if self.closed:
+            example_key_url = key_urls[0][0]
             key_urls = '\n'.join((' '.join(keyurl) for keyurl in key_urls))
             urlqueue_fn = str(os.getpid()) + '.urls'
             with open(os.path.join(self.local_dir, urlqueue_fn), 'wt') as fh:
                 fh.write(key_urls)
             os.rename(os.path.join(self.local_dir, urlqueue_fn), os.path.join(self.urlqueue_dir, urlqueue_fn))
             result = subprocess.run(
-                ('git', 'annex', 'enableremote', self.uuid),
+                ('git', 'annex', '--debug', 'checkpresentkey', example_key_url, self.uuid),
                 input=keyurls,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
