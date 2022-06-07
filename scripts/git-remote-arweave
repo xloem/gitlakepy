@@ -1,71 +1,80 @@
 #!/usr/bin/env python3
 
-import click
-import json
-import requests
-session = requests.Session()
+####
+# - https://arweave.net/txid or arweave://txid -> tip object store
+# - arweave://block/bundle/dataitem -> root object store
+# - valid object stores reference the root object store as an alternate.
 
-GATEWAY_URI='https://arweave.net'
+import ar
+peer = ar.Peer()
 
-@click.group()
-def cli():
-    pass
+import dulwich.repo, dulwich.server
 
-def txdata(uri, id):
-    data = session.get(uri + '/' + id)
-    try:
-        return data.json()
-    except:
-        return data.text
+ADDRESS_LEN = 43
+BLOCK_LEN = 64
 
-def yield_txs(gw, owners = None, **tags):
-    pre_cursor_query = 'query { transactions( '
-    if owners is not None:
-        pre_cursor_query += 'owners: ' + json.dumps(owners)
-    if len(tags) > 0:
-        pre_cursor_query += 'tags: [ '
-        for name, value in tags.items():
-            pre_cursor_query += '{ name: ' + json.dumps(name) + ', values: [' + json.dumps(value) + '] } '
-        pre_cursor_query += '] '
-    pre_cursor_query += 'after: '
+class ArweavePath:
+    def __init__(self, path):
+        self.
 
-    post_cursor_query = ' ) { edges { node { id owner { address } tags { name value } } cursor } } }'
-    cursor = ''
-    while True:
-        query = pre_cursor_query + json.dumps(cursor) + post_cursor_query
-        resp = session.post(gw + '/graphql',
-                json={'query': query}
+    @staticmethod
+    def parsepart(self, parts, partname, partlen):
+        if len(parts):
+            if len(parts[0]) == partlen:
+                return parts.pop(0), parts
+            elif parts[0].startswith(partname + ':') and len(parts[0]) = partlen + len(partname) + 1:
+                return parts.pop(0)[len(partname)+1:], parts
+            elif len(parts) > 1 and parts[0] == partname and len(parts[1]) == partlen:
+                return parts[1], parts[2:]
+        return None, parts
+    @staticmethod
+    def path2parts(self, path):
+        if path.startswith('arweave://' or path.startswith('http'):
+            proto, path = path.split('://', 1)
+        else:
+            proto = None
+        if proto.startswith('http'):
+            host, path = path.split('/', 1)
+            ar.logger.warning(f'Ignoring host: {host}')
+        else:
+            host = None
+        path = path.split('/')
+        block, path = self.parsepart(parts, 'block', BLOCK_LEN)
+        bundle, path = self.parsepart(parts, 'bundle', ADDRESS_LEN)
+        id, path = self.parsepart(parts, 'id', ADDRESS_LEN)
+        return dict(
+            block = block, bundle = bundle, id = id,
+            path = '/'.join(path)
         )
-        data = resp.json()
-        if 'data' not in data:
-            raise Exception(data)
-        edges = data['data']['transactions']['edges']
-        if not len(edges):
-            break
-        for edge in edges:
-            cursor = edge['cursor']
-            node = edge['node']
-            yield dict(
-                txid = node['id'],
-                owner = node['owner']['address'],
-                tags = {tag['name']: tag['value'] for tag in node['tags']},
-            )
 
-@cli.command()
-@click.option('--gw', default = GATEWAY_URI)
-@click.argument('address')
-def list_txs(gw, address):
-    for tx in yield_txs(gw, owners = [address]):
-        print(tx)
+class HookedFilesystem:
+    def __init__(self, loader):
+        self.loader = loader
+        self.path = self.path(loader)
+    class path:
+        def __init__(self, loader):
+            self.loader = loader
+        def join(self, *components):
+            return '/'.join(components)
+        def isfile(self, path):
+            return path.endsiwth('/') or '/' not in path.replace('//','')
+        @staticmethod
+        def isdir(path):
+            
+dulwich.repo.os = HookedFilesystem
 
-@cli.command()
-@click.option('--gw', default = GATEWAY_URI)
-def list_updates(gw = GATEWAY_URI):
-    for tx in yield_txs(gw, Type = Type):
-        tx['data'] = txdata(uri, tx['txid'])
-        print(tx)
+class HookedBackend(dulwich.server.Backend):
+    def open_repository(self, path):
+        return dulwich.repo.Repo(path)
+        
+
+class GitRemote:
+    def __init__(self, stdin, stoud):
+        self.stdin = stdin
+        self.stdout = stdout
     
 
 if __name__ == '__main__':
-    cli()
-    raise Exception('===> This is just a prototype to show git updates from arweave. <===')
+    HookedBackend().open_repository('asdf')
+    #import sys
+    #GitRemote().run(sys.stdin, sys.stdout)

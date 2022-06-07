@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+
+import click
+import json
+import requests
+session = requests.Session()
+
+GATEWAY_URI='https://arweave.net'
+
+@click.group()
+def cli():
+    pass
+
+def txdata(uri, id):
+    data = session.get(uri + '/' + id)
+    try:
+        return data.json()
+    except:
+        return data.text
+
+def yield_txs(gw, owners = None, **tags):
+    pre_cursor_query = 'query { transactions( '
+    if owners is not None:
+        pre_cursor_query += 'owners: ' + json.dumps(owners)
+    if len(tags) > 0:
+        pre_cursor_query += 'tags: [ '
+        for name, value in tags.items():
+            pre_cursor_query += '{ name: ' + json.dumps(name) + ', values: [' + json.dumps(value) + '] } '
+        pre_cursor_query += '] '
+    pre_cursor_query += 'after: '
+
+    post_cursor_query = ' ) { edges { node { id owner { address } tags { name value } } cursor } } }'
+    cursor = ''
+    while True:
+        query = pre_cursor_query + json.dumps(cursor) + post_cursor_query
+        resp = session.post(gw + '/graphql',
+                json={'query': query}
+        )
+        data = resp.json()
+        if 'data' not in data:
+            raise Exception(data)
+        edges = data['data']['transactions']['edges']
+        if not len(edges):
+            break
+        for edge in edges:
+            cursor = edge['cursor']
+            node = edge['node']
+            yield dict(
+                txid = node['id'],
+                owner = node['owner']['address'],
+                tags = {tag['name']: tag['value'] for tag in node['tags']},
+            )
+
+@cli.command()
+@click.option('--gw', default = GATEWAY_URI)
+@click.argument('address')
+def list_txs(gw, address):
+    for tx in yield_txs(gw, owners = [address]):
+        print(tx)
+
+@cli.command()
+@click.option('--gw', default = GATEWAY_URI)
+def list_updates(gw = GATEWAY_URI):
+    for tx in yield_txs(gw, Type = Type):
+        tx['data'] = txdata(uri, tx['txid'])
+        print(tx)
+    
+
+if __name__ == '__main__':
+    cli()
+    raise Exception('===> This is just a prototype to show git updates from arweave. <===')
