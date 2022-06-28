@@ -4,6 +4,7 @@
 # - https://arweave.net/txid or arweave://txid -> tip object store
 # - arweave://block/bundle/dataitem -> root object store
 # - valid object stores reference the root object store as an alternate.
+# maybe two entries in alternates, or a separate alternates file, or something
 
 import ar
 peer = ar.Peer()
@@ -14,22 +15,35 @@ ADDRESS_LEN = 43
 BLOCK_LEN = 64
 
 class ArweavePath:
-    def __init__(self, path):
-        self.
+#    def __init__(self, path):
+#        self.
 
     @staticmethod
-    def parsepart(self, parts, partname, partlen):
+    def parsepart(parts, partname, partlen):
         if len(parts):
             if len(parts[0]) == partlen:
                 return parts.pop(0), parts
-            elif parts[0].startswith(partname + ':') and len(parts[0]) = partlen + len(partname) + 1:
+            elif parts[0].startswith(partname + ':') and len(parts[0]) == partlen + len(partname) + 1:
                 return parts.pop(0)[len(partname)+1:], parts
             elif len(parts) > 1 and parts[0] == partname and len(parts[1]) == partlen:
                 return parts[1], parts[2:]
+            if '?' in parts[-1]:
+                _, query = parts[-1].split('?',1)
+                if '#' in query:
+                    query1, query2 = query.split('#',1)
+                    query = query1 + '&' + query2
+            elif '#' in parts[-1]:
+                _, query = parts[-1].split('#',1)
+            else:
+                query = ''
+            queryitems = query.split('&')
+            for queryitem in queryitems:
+                if queryitem.startswith(partname + '='):
+                    return queryitem.split('=',1)[1] , parts
         return None, parts
-    @staticmethod
-    def path2parts(self, path):
-        if path.startswith('arweave://' or path.startswith('http'):
+    @classmethod
+    def path2parts(cls, path):
+        if path.startswith('arweave://') or path.startswith('http'):
             proto, path = path.split('://', 1)
         else:
             proto = None
@@ -38,13 +52,13 @@ class ArweavePath:
             ar.logger.warning(f'Ignoring host: {host}')
         else:
             host = None
-        path = path.split('/')
-        block, path = self.parsepart(parts, 'block', BLOCK_LEN)
-        bundle, path = self.parsepart(parts, 'bundle', ADDRESS_LEN)
-        id, path = self.parsepart(parts, 'id', ADDRESS_LEN)
+        parts = path.split('/')
+        block, parts = cls.parsepart(parts, 'block', BLOCK_LEN)
+        bundle, parts = cls.parsepart(parts, 'bundle', ADDRESS_LEN)
+        id, parts = cls.parsepart(parts, 'id', ADDRESS_LEN)
         return dict(
             block = block, bundle = bundle, id = id,
-            path = '/'.join(path)
+            path = '/'.join(parts)
         )
 
 class HookedFilesystem:
@@ -54,14 +68,36 @@ class HookedFilesystem:
     class path:
         def __init__(self, loader):
             self.loader = loader
+            self.manifest_cache = {}
+        def _manifest(self, path):
+            path = ArweavePath.path2parts(path)
+            id = path['id']
+            result = self.manifest_cache.get(id)
+            if result is None:
+                data = self.loader.data(txid=id,bundleid=path['bundle'],blockid=path['block'])
+                result = json.loads(data)
+                self.manifest_cache['id'] = result
+            return result, path
         def join(self, *components):
             return '/'.join(components)
         def isfile(self, path):
-            return path.endsiwth('/') or '/' not in path.replace('//','')
+            manifest, path = self._manifest(path)
+            return path in manifest['paths']
         @staticmethod
         def isdir(path):
+            manifest, path = self._manifest(path)
+            if path in ('','/'):
+                return True
+            for dir in manifest['paths']:
+                if dir == path:
+                    return False
+                if dir.startswith(path + '/'):
+                    return True
+            return False
             
-dulwich.repo.os = HookedFilesystem
+import ar
+import bundlr, bundlr.loader
+dulwich.repo.os = HookedFilesystem(bundlr.loader.Loader(bundlr.Node(), ar.Peer(), ar.Peer(), None))
 
 class HookedBackend(dulwich.server.Backend):
     def open_repository(self, path):
@@ -69,12 +105,12 @@ class HookedBackend(dulwich.server.Backend):
         
 
 class GitRemote:
-    def __init__(self, stdin, stoud):
+    def __init__(self, stdin, stdout):
         self.stdin = stdin
         self.stdout = stdout
     
 
 if __name__ == '__main__':
-    HookedBackend().open_repository('asdf')
+    HookedBackend().open_repository('https://arweave.net/FJhaDPKypU54fmD6-5wGfsweXtQtEBlfr0xUItqWb44/?bundle=ffsTblj5lmvvnLtYp6Q35DM2XY0oj2vh5YSqeWUjniY&block=EoPav_1hC5KNtM32SFeaodhGsVLBgIrtwI5cp0XIZjz0baM0tzDCO0vXWCnwVcqw')
     #import sys
     #GitRemote().run(sys.stdin, sys.stdout)
