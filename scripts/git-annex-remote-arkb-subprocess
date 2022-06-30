@@ -137,13 +137,13 @@ class ArkbStorageRemote(SpecialRemote):
         manifest_filename = os.path.join(self.combining_dir, 'manifest.arkb')
         if not os.path.exists(manifest_filename):
             for path in self.combining.keys():
-                manifest_filename = os.path.join(self.combining_dir, os.path.basename(path), 'manifest.arkb')
+                manifest_filename = os.path.join(self.combining_dir, os.path.dirname(path), 'manifest.arkb')
                 if os.path.exists(manifest_filename):
-                    manifest_filename = os.path.join(self.combining_dir, 'manifest.arkb')
                     break
         if not os.path.exists(manifest_filename):
             self.combined = 0 # to quickly prevent cleanup during debugging
             self.combined_pathnames = 0
+            self.combining_dir = self.combining_dir + '_'
             raise RemoteError(f'not found on fs after arkb deploy: {manifest_filename}')
         lines = output.split('\n')
         self._debug('lines[-3] = ' + repr(lines[-3]))
@@ -215,7 +215,7 @@ class ArkbStorageRemote(SpecialRemote):
             size = file.tell()
         if self.subchunk and size > self.subchunk:
             new_subdir = key
-            new_fulldir = os.path.join(self.combining_dir, key); os.makedirs(new_fulldir, exist_ok=True)
+            new_fulldir = os.path.join(self.combining_dir, new_subdir); os.makedirs(new_fulldir, exist_ok=True)
             progress = 0
             with open(filename, 'rb') as file:
                 keytxids = {}
@@ -226,10 +226,10 @@ class ArkbStorageRemote(SpecialRemote):
                         manifest_txid, file_txids = self.do_combine()
                         keytxids.update(file_txids)
                         self.annex.progress(progress)
-                        new_fulldir = os.path.join(self.combining_dir, key); os.makedirs(new_fulldir, exist_ok=True)
+                        new_fulldir = os.path.join(self.combining_dir, new_subdir); os.makedirs(new_fulldir, exist_ok=True)
                     progress += len(data)
                     self.combined += len(data)
-                    self.combined_pathnames += len(os.path.join(key, newfilename))
+                    self.combined_pathnames += len(os.path.join(new_subdir, newfilename))
                     self.combining[new_subdir + '/' + newfilename] = False
                     with open(os.path.join(new_fulldir, newfilename), 'wb') as newfile:
                         newfile.write(data)

@@ -1,6 +1,6 @@
 MAXFILESIZE=100000
 MAXFILECOUNT=824
-CONCURRENCY=32 #$((MAXFILECOUNT))
+CONCURRENCY=128 #$((MAXFILECOUNT))
 
 # unpack all packfiles
 mv objects/pack/* . 2>/dev/null &&
@@ -62,7 +62,7 @@ do
 	while true
 	do
 		if ! arkb deploy "$dir" $GATEWAY $WALLET $DEBUG --index git-object-store -v --no-colors --concurrency "$CONCURRENCY" --auto-confirm --use-bundler https://node2.bundlr.network --tag-name Type --tag-value git-object-store | tee "$dir".arkb.log; then exit -1; fi
-		if ! grep "timeout of 100000ms exceeded" "$dir".arkb.log
+		if ! grep "timeout of [0-9]*ms exceeded" "$dir".arkb.log
 		then
 			break
 		fi
