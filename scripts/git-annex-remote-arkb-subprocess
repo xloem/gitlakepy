@@ -144,7 +144,7 @@ class ArkbStorageRemote(SpecialRemote):
         if not os.path.exists(manifest_filename):
             self.combined = 0 # to quickly prevent cleanup during debugging
             self.combined_pathnames = 0
-            raise RemoteError(f'not found after deploy: {manifest_filename}')
+            raise RemoteError(f'not found on fs after arkb deploy: {manifest_filename}')
         lines = output.split('\n')
         self._debug('lines[-3] = ' + repr(lines[-3]))
         self._debug('lines[-2] = ' + repr(lines[-2]))
