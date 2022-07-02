@@ -456,6 +456,7 @@ class ArkbStorageRemote(SpecialRemote):
     def checkpresent(self, key):
         if self.combine_to and key in self.combining:
             return True
+        last_exc = None
         for txid in self.txids(key):
             try:
                 response = self._txid_request('HEAD', key, txid)
@@ -479,8 +480,11 @@ class ArkbStorageRemote(SpecialRemote):
                         for inner_response in concurrent.futures.ThreadPoolExecutor(max_workers=5).map(check_subtx, txids):
                             pass
                 return True
-            except:
+            except exc:
+                last_exc = exc
                 continue
+        if last_exc.response.status_code == 404:
+            self._info(f'remove and readd {key} from this remote to hide this failure')
         return False
 
     def getavailability(self):
