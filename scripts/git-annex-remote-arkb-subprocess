@@ -484,7 +484,8 @@ class ArkbStorageRemote(SpecialRemote):
                 last_exc = exc
                 continue
         if last_exc.response.status_code == 404:
-            self._info(f'remove and readd {key} from this remote to hide this failure')
+            # we could also just drop it, or git-annex might retain the failure, maybe if ownership is claimed of the url
+            self._info(f'remove and readd {key} from this remote to hide this failure. data is reused if the same machine is used to reupload.')
         return False
 
     def getavailability(self):
