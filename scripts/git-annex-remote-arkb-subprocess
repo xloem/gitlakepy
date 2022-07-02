@@ -575,8 +575,34 @@ class ArkbStorageRemote(SpecialRemote):
     #        result.add('JustPut')
     #    return result
 
+    def key_url_date(self, key, *urls):
+        dirhash_lower = self.annex.dirhash_lower(key)
+        gitdir = self.annex.getgitdir()
+        lsweburl = subprocess.run(
+            ('git', '--git-dir', gitdir, 'ls-tree', '--full-tree', 'git-annex', os.path.join(dirhash_lower, key + '.log.web')),
+            stdout=subprocess.PIPE,
+            check=True,
+            text=True
+        ).stdout
+        mode, objtype, objid = lsweburl.split('\t',1)[0].split(' ')
+        proc = subprocess.Popen(
+            ('git', 'cat-file', objtype, objid),
+            stdout = subprocess.PIPE,
+            text=True
+        )
+        timestamps = {}
+        try:
+            for line in proc.stdout:
+                timestamp, state, url = line.split(' ', 3)
+                if url in urls:
+                    timestamps[url] = timestamp
+                    if len(timestamps) >= len(urls):
+                        break
+        finally:
+            proc.terminate()
+        return min((timestamp for timestamp in timestamps.values()))
+
     def last_key_date(self, key):
-        import subprocess
         gitdir = self.annex.getgitdir()
         proc = subprocess.Popen(
             ('git', '--git-dir', gitdir, 'annex', 'log', '--all'),
