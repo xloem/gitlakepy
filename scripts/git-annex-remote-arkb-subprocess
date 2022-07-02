@@ -339,6 +339,7 @@ class ArkbStorageRemote(SpecialRemote):
                 try:
                     self.retrieve_url(url, local_file)
                     self._info(f'{key} stalled at {url}')
+                    self._info(f'{key} uploaded at {self.last_key_date(key)}')
                     return
                 except Exception as exc:
                     last_exc = exc
@@ -398,6 +399,7 @@ class ArkbStorageRemote(SpecialRemote):
                             url = '/'.join(urlparts)
                             urls.append(url)
                         for inner_response in concurrent.futures.ThreadPoolExecutor(max_workers=5).map(get_stream, urls):
+                            inner_response.raise_for_status()
                             url = inner_response.url
                             self._debug(url)
                             #with requests.get(url, stream=True) as stream:
@@ -441,6 +443,7 @@ class ArkbStorageRemote(SpecialRemote):
                 try:
                     requests.head(url).raise_for_status()
                     self._info(f'{key} stalled at {url}')
+                    self._info(f'{key} uploaded at {self.last_key_date(key)}')
                     return True
                 except:
                     continue
@@ -532,6 +535,30 @@ class ArkbStorageRemote(SpecialRemote):
     #    if '_git_annex_just_put' in item:
     #        result.add('JustPut')
     #    return result
+
+    def last_key_date(self, key):
+        import subprocess
+        gitdir = self.annex.getgitdir()
+        proc = subprocess.Popen(
+            ('git', '--git-dir', gitdir, 'annex', 'log', '--all'),
+            stdout=subprocess.PIPE,
+            text=True
+        )
+        try:
+            for line in proc.stdout:
+                logdata, remotedata = line.split(' | ', 1)
+                remote_uuid, remote_name_unparsed = remotedata.split(' -- ', 1)
+                if remote_uuid != self.uuid:
+                    continue
+                logdata, logkey = logdata.rsplit(' ', 1)
+                if logkey != key:
+                    continue
+                state, date = logdata.split(' ', 1)
+                if state == '+':
+                    return date
+        finally:
+            proc.terminate()
+        return None
 
 if __name__ == '__main__':
     main = Main()
