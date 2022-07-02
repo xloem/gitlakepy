@@ -338,12 +338,13 @@ class ArkbStorageRemote(SpecialRemote):
             for url in self.txid_tmpurls(txid):
                 try:
                     self.retrieve_url(url, local_file)
-                    self._info(f'{key} stalled at {url}')
+                    self._info(f'{key} or a subpart stalled at {url}')
                     self._info(f'{key} uploaded at {self.last_key_date(key)}')
                     return
                 except Exception as exc:
                     last_exc = exc
                     continue
+        self._info('retrieve_url: ' + str(last_exc))
         raise RemoteError('retrieve_url: ' + str(last_exc))
 
     def retrieve_url(self, url, local_file):
@@ -429,24 +430,57 @@ class ArkbStorageRemote(SpecialRemote):
 
     def txids(self, key):
         return [url.split('/',3)[-1] for url in (*self.annex.geturls(key, self.gateway + '/'), *self.annex.geturls(key, URI_PROTO))]
+
+    def _txid_request(self, method, key, txid, subdir=''):
+        for url in self.txid_urls(txid):
+            try:
+                response = requests.request(method=method, url=url+subdir)
+                response.raise_for_status()
+                return response
+            except Exception as exc:
+                last_exc = exc
+                continue
+        for url in self.txid_tmpurls(txid):
+            try:
+                response = requests.request(method=method, url=url+subdir)
+                response.raise_for_status()
+                self._info(f'{txid} stalled at {url}')
+                self._info(f'{key} {txid} uploaded at {self.last_key_date(key)}')
+                return response
+            except Exception as exc:
+                last_exc = exc
+                continue
+        self._info('_txid_request ' + key + ' ' + txid + ': ' + str(last_exc))
+        raise RemoteError('_txid_request ' + key + ' ' + txid + ': ' + str(last_exc))
+
     def checkpresent(self, key):
         if self.combine_to and key in self.combining:
             return True
         for txid in self.txids(key):
-            for url in (*self.txid_urls(txid), URI_PROTO + txid):
-                try:
-                    requests.head(url).raise_for_status()
-                    return True
-                except:
-                    continue
-            for url in self.txid_tmpurls(txid):
-                try:
-                    requests.head(url).raise_for_status()
-                    self._info(f'{key} stalled at {url}')
-                    self._info(f'{key} uploaded at {self.last_key_date(key)}')
-                    return True
-                except:
-                    continue
+            try:
+                response = self._txid_request('HEAD', key, txid)
+                if response.headers['Content-Type'] == 'application/x.arweave-manifest+json' or response.url[-1] == '/':
+                    '''this is a split file, ensure all the parts exist'''
+                    if response.headers['Content-Type'] == 'application/x.arweave-manifest+json':
+                        manifest = self._txid_request('GET', key, txid).json()
+                        filetxids = {key: value['id'] for key, value in manifest['paths']}
+                        index_file = manifest['index']
+                        response = self._txid_request('GET', key, filetxids[index_file])
+                    subfiles = {}
+                    for subfile in response.text.split('\n'):
+                        subfiles[subfile] = filetxids[subfile]
+                    # note: subfiles has only the txid, not the whole url
+                    def check_subtx(txid):
+                        return self._txid_request('HEAD', key, txid)
+                    def get_subtx(txid):
+                        return self._txid_request('GET', key, txid)
+                    for response in concurrent.futures.ThreadPoolExecutor(max_workers=len(subfiles)).map(get_subtx, subfiles.values()):
+                        txids = response.text.split('\n')
+                        for inner_response in concurrent.futures.ThreadPoolExecutor(max_workers=5).map(check_subtx, txids):
+                            pass
+                return True
+            except:
+                continue
         return False
 
     def getavailability(self):
