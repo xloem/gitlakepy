@@ -351,11 +351,15 @@ class ArkbStorageRemote(SpecialRemote):
                 try:
                     self.retrieve_url(url, local_file)
                     self._info(f'{key} or a subpart stalled at {url}')
-                    self._info(f'{key} uploaded at {self.key_urls_date(key, *txid_urls, *txid_tmpurls, ":" + URI_PROTO + root_txid)}')
+                    self._info(f'{key} uploaded at {self.key_urls_date(key, *txid_urls, *txid_tmpurls, ":" + URI_PROTO + txid)}')
                     return
                 except Exception as exc:
                     last_exc = exc
                     continue
+        try:
+            raise last_exc
+        except:
+            ar.logger.error(f'{gateway.api_url}/{txid+subdir}: ' + str(last_exc))
         self._info('retrieve_url: ' + str(last_exc))
         raise RemoteError('retrieve_url: ' + str(last_exc))
 
@@ -383,8 +387,8 @@ class ArkbStorageRemote(SpecialRemote):
                     stream.close()
                     assert manifest['manifest'] == 'arweave/paths'
                     assert manifest['version'] == '0.1.0'
-                    filetxids = {key: value['id'] for key, value in manifest['paths']}
-                    index_file = manifest['index']
+                    filetxids = {key: value['id'] for key, value in manifest['paths'].items()}
+                    index_file = manifest['index']['path']
                     urlparts[txidurlidx] = filetxids[index_file]
                     stream = requests.get('/'.join(urlparts))
                     stream.raise_for_status()
@@ -462,6 +466,7 @@ class ArkbStorageRemote(SpecialRemote):
                 response = gateway._request(txid + subdir, method=method)
                 return response
             except Exception as exc:
+                ar.logger.error(f'{gateway.api_url}/{txid+subdir}: ' + str(exc))
                 self._info(f'{gateway.api_url}/{txid+subdir}: ' + str(exc))
                 last_exc = exc
                 continue
@@ -509,6 +514,7 @@ class ArkbStorageRemote(SpecialRemote):
         if self.combine_to and key in self.combining:
             return True
         last_exc = None
+        missing_txids = []
         for txid in self.txids(key):
             try:
                 response = self._txid_request('HEAD', key, txid)
@@ -537,8 +543,17 @@ class ArkbStorageRemote(SpecialRemote):
                         txids = response.text.split('\n')
                         for inner_response in concurrent.futures.ThreadPoolExecutor(max_workers=len(txids)).map(check_subtx, txids):
                             pass
+                for missing_txid in missing_txids:
+                    # speeds things up in the future if missing txids that get iterated are removed
+                    # this is only done if the item is found among a different one
+                    for missing_url in self.txid_urls(missing_txid):
+                        self.annex.seturlmissing(key, missing_url)
+                    for missing_uri in self.txid_uris(missing_txid):
+                        self.annex.seturimissing(key, missing_uri)
+                    self.annex.seturimissing(key, URI_PROTO + missing_txid)
                 return True
             except Exception as exc:
+                missing_txids.append(txid)
                 last_exc = exc
                 continue
         if hasattr(last_exc, 'response') and last_exc.response.status_code == 404:
