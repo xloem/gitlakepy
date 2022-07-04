@@ -2,7 +2,10 @@
 
 from annexremote import Master as Main, SpecialRemote, RemoteError, UnsupportedRequest
 
+import ar, bundlr
+
 import concurrent.futures
+import datetime
 import json, os, random, shutil, subprocess, sys, time
 import re, requests
 
@@ -48,7 +51,8 @@ class ArkbStorageRemote(SpecialRemote):
     def prepare(self):
         # prepare to be used for transfers, e.g. open connection
         self.uuid = self.annex.getuuid()
-        self.local_dir = os.path.join(self.annex.getgitdir(), self.__class__.__name__, self.uuid)
+        self.git_dir = self.annex.getgitdir()
+        self.local_dir = os.path.join(self.git_dir, self.__class__.__name__, self.uuid)
         os.makedirs(self.local_dir, exist_ok=True)
         if self.annex.getconfig('wallet') != '':
             self.wallet_path = os.path.join(self.local_dir, 'wallet.json')
@@ -69,9 +73,14 @@ class ArkbStorageRemote(SpecialRemote):
 
         self._info('arkb ' + self.arkb('version').strip())
 
+        self.ar_peers = [ar.Peer()]
+
         self.bundler = self.annex.getconfig('bundler')
         if self.bundler:
             self.params_deploy = (*self.params_deploy, '--use-bundler', self.bundler)
+            self.bundlr_nodes = [bundlr.Node(self.bundler)]
+        else:
+            self.bundlr_nodes = []
         self.gateway = self.annex.getconfig('gateway')
         if not self.gateway:
             self.gateway = 'https://arweave.net'
@@ -328,18 +337,20 @@ class ArkbStorageRemote(SpecialRemote):
             self.do_combine()
         last_exc = RemoteError('Logic error? No urls stored for key ' + key)
         for txid in self.txids(key):
-            for url in self.txid_urls(txid):
+            txid_urls = self.txid_urls(txid)
+            for url in txid_urls:
                 try:
                     self.retrieve_url(url, local_file)
                     return
                 except Exception as exc:
                     last_exc = exc
                     continue
-            for url in self.txid_tmpurls(txid):
+            txid_tmpurls = self.txid_tmpurls(txid)
+            for url in txid_tmpurls:
                 try:
                     self.retrieve_url(url, local_file)
                     self._info(f'{key} or a subpart stalled at {url}')
-                    self._info(f'{key} uploaded at {self.last_key_date(key)}')
+                    self._info(f'{key} uploaded at {self.key_urls_date(key, *txid_urls, *txid_tmpurls, ":" + URI_PROTO + root_txid)}')
                     return
                 except Exception as exc:
                     last_exc = exc
@@ -431,8 +442,11 @@ class ArkbStorageRemote(SpecialRemote):
     def txids(self, key):
         return [url.split('/',3)[-1] for url in (*self.annex.geturls(key, self.gateway + '/'), *self.annex.geturls(key, URI_PROTO))]
 
-    def _txid_request(self, method, key, txid, subdir=''):
-        for url in self.txid_urls(txid):
+    def _txid_request(self, method, key, txid, subdir='', root_txid=None):
+        #self._debug(f'{key} {method} {txid}')
+        txid_urls = self.txid_urls(txid)
+        # could use concurrent.futures.ThreadPoolExecutor somewhere here for speedup
+        for url in txid_urls:
             try:
                 response = requests.request(method=method, url=url+subdir)
                 response.raise_for_status()
@@ -440,18 +454,30 @@ class ArkbStorageRemote(SpecialRemote):
             except Exception as exc:
                 last_exc = exc
                 continue
-        for url in self.txid_tmpurls(txid):
+        if subdir:
+            manifest = self._txid_request('GET', key, txid, root_txid=root_txid).json()
+            if root_txid is None:
+                root_txid = txid
+            txid = manifest['paths'][subdir[1:]]
+        txid_tmpurls = self.txid_tmpurls(txid)
+        for url in txid_tmpurls:
             try:
-                response = requests.request(method=method, url=url+subdir)
+                response = requests.request(method=method, url=url)
                 response.raise_for_status()
+                if root_txid is None or root_txid == txid:
+                    root_txid = txid
+                    root_urls = txid_urls + txid_tmpurls + [':' + URI_PROTO + root_txid]
+                else:
+                    root_urls = [':' + URI_PROTO + root_txid] #self.txid_urls(root_txid) + self.txid_tmpurls(root_txid)
+                root_txid = root_txid or txid
                 self._info(f'{txid} stalled at {url}')
-                self._info(f'{key} {txid} uploaded at {self.last_key_date(key)}')
+                self._info(f'{key} {txid} uploaded at {self.key_urls_date(key, *root_urls)}')
                 return response
             except Exception as exc:
                 last_exc = exc
                 continue
-        self._info('_txid_request ' + key + ' ' + txid + ': ' + str(last_exc))
-        raise RemoteError('_txid_request ' + key + ' ' + txid + ': ' + str(last_exc))
+        self._info('_txid_request ' + str(key) + ' ' + str(txid) + ': ' + str(last_exc))
+        raise RemoteError('_txid_request ' + str(key) + ' ' + str(txid) + ': ' + str(last_exc))
 
     def checkpresent(self, key):
         if self.combine_to and key in self.combining:
@@ -460,32 +486,40 @@ class ArkbStorageRemote(SpecialRemote):
         for txid in self.txids(key):
             try:
                 response = self._txid_request('HEAD', key, txid)
-                if response.headers['Content-Type'] == 'application/x.arweave-manifest+json' or response.url[-1] == '/':
+                self._debug(response.url + ': ' + response.headers.get('Content-Type', 'no Content-Type header'))
+                if response.headers.get('Content-Type', None) == 'application/x.arweave-manifest+json' or response.url[-1] == '/':
                     '''this is a split file, ensure all the parts exist'''
-                    if response.headers['Content-Type'] == 'application/x.arweave-manifest+json':
+                    subfiles = {}
+                    if response.headers.get('Content-Type', None) == 'application/x.arweave-manifest+json':
                         manifest = self._txid_request('GET', key, txid).json()
                         filetxids = {key: value['id'] for key, value in manifest['paths']}
                         index_file = manifest['index']
-                        response = self._txid_request('GET', key, filetxids[index_file])
-                    subfiles = {}
-                    for subfile in response.text.split('\n'):
-                        subfiles[subfile] = filetxids[subfile]
+                        response = self._txid_request('GET', key, filetxids[index_file], root_txid=txid)
+                        for subfile in response.text.split('\n'):
+                            subfiles[subfile] = (filetxids[subfile], None)
+                    else:
+                        response = self._txid_request('GET', key, txid)
+                        for subfile in response.text.split('\n'):
+                            subfiles[subfile] = (txid, '/' + subfile)
+                    self._debug(str(subfiles))
                     # note: subfiles has only the txid, not the whole url
-                    def check_subtx(txid):
-                        return self._txid_request('HEAD', key, txid)
-                    def get_subtx(txid):
-                        return self._txid_request('GET', key, txid)
+                    def check_subtx(subtxid):
+                        return self._txid_request('HEAD', key, subtxid, root_txid=txid)
+                    def get_subtx(params):
+                        return self._txid_request('GET', key, *params, root_txid=txid)
                     for response in concurrent.futures.ThreadPoolExecutor(max_workers=len(subfiles)).map(get_subtx, subfiles.values()):
                         txids = response.text.split('\n')
-                        for inner_response in concurrent.futures.ThreadPoolExecutor(max_workers=5).map(check_subtx, txids):
+                        for inner_response in concurrent.futures.ThreadPoolExecutor(max_workers=len(txids)).map(check_subtx, txids):
                             pass
                 return True
-            except exc:
+            except Exception as exc:
                 last_exc = exc
                 continue
-        if last_exc.response.status_code == 404:
+        if hasattr(last_exc, 'response') and last_exc.response.status_code == 404:
             # we could also just drop it, or git-annex might retain the failure, maybe if ownership is claimed of the url
             self._info(f'remove and readd {key} from this remote to hide this failure. data is reused if the same machine is used to reupload.')
+        elif last_exc is not None:
+            raise last_exc
         return False
 
     def getavailability(self):
@@ -575,11 +609,12 @@ class ArkbStorageRemote(SpecialRemote):
     #        result.add('JustPut')
     #    return result
 
-    def key_url_date(self, key, *urls):
+    def key_urls_date(self, key, *urls):
         dirhash_lower = self.annex.dirhash_lower(key)
-        gitdir = self.annex.getgitdir()
+        self._debug(f'dirhash_lower(key) = ' + dirhash_lower)
+        self._debug(f'gitdir = ' + self.git_dir)
         lsweburl = subprocess.run(
-            ('git', '--git-dir', gitdir, 'ls-tree', '--full-tree', 'git-annex', os.path.join(dirhash_lower, key + '.log.web')),
+            ('git', '--git-dir', self.git_dir, 'ls-tree', '--full-tree', 'git-annex', os.path.join(dirhash_lower, key + '.log.web')),
             stdout=subprocess.PIPE,
             check=True,
             text=True
@@ -593,19 +628,27 @@ class ArkbStorageRemote(SpecialRemote):
         timestamps = {}
         try:
             for line in proc.stdout:
-                timestamp, state, url = line.split(' ', 3)
+                timestamp, state, url = line[:-1].split(' ', 3)
+                if url.endswith('\n'):
+                    url = url[:-1]
+                #self._debug(url + ' ?in? ' + str(urls))
                 if url in urls:
-                    timestamps[url] = timestamp
+                    if timestamp.endswith('s'):
+                        timestamp = timestamp[:-1]
+                    timestamps[url] = float(timestamp)
                     if len(timestamps) >= len(urls):
                         break
         finally:
             proc.terminate()
-        return min((timestamp for timestamp in timestamps.values()))
+        if len(timestamps):
+            min_timestamp = min((timestamp for timestamp in timestamps.values()))
+            return datetime.datetime.fromtimestamp(min_timestamp).isoformat()
+        else:
+            return f'![did not find any urls like {urls[0]} associated with {key}]!'
 
     def last_key_date(self, key):
-        gitdir = self.annex.getgitdir()
         proc = subprocess.Popen(
-            ('git', '--git-dir', gitdir, 'annex', 'log', '--all'),
+            ('git', '--git-dir', self.git_dir, 'annex', 'log', '--all'),
             stdout=subprocess.PIPE,
             text=True
         )
