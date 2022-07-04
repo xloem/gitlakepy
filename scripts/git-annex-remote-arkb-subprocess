@@ -73,7 +73,8 @@ class ArkbStorageRemote(SpecialRemote):
 
         self._info('arkb ' + self.arkb('version').strip())
 
-        self.ar_peers = [ar.Peer()]
+        self.ar_gateways = [ar.Peer()]
+        self.ar_peers = self.ar_gateways
 
         self.bundler = self.annex.getconfig('bundler')
         if self.bundler:
@@ -444,14 +445,24 @@ class ArkbStorageRemote(SpecialRemote):
 
     def _txid_request(self, method, key, txid, subdir='', root_txid=None):
         #self._debug(f'{key} {method} {txid}')
+        if subdir is None:
+            subdir = ''
         txid_urls = self.txid_urls(txid)
-        # could use concurrent.futures.ThreadPoolExecutor somewhere here for speedup
-        for url in txid_urls:
+        ## could use concurrent.futures.ThreadPoolExecutor somewhere here for speedup
+        #for url in txid_urls:
+        #    try:
+        #        response = requests.request(method=method, url=url+subdir)
+        #        response.raise_for_status()
+        #        return response
+        #    except Exception as exc:
+        #        last_exc = exc
+        #        continue
+        for gateway in self.ar_gateways:
             try:
-                response = requests.request(method=method, url=url+subdir)
-                response.raise_for_status()
+                response = gateway._request(txid + subdir, method=method)
                 return response
             except Exception as exc:
+                self._info(f'{gateway.api_url}/{txid+subdir}: ' + str(exc))
                 last_exc = exc
                 continue
         if subdir:
@@ -460,22 +471,37 @@ class ArkbStorageRemote(SpecialRemote):
                 root_txid = txid
             txid = manifest['paths'][subdir[1:]]
         txid_tmpurls = self.txid_tmpurls(txid)
-        for url in txid_tmpurls:
+        for node in self.bundlr_nodes:
             try:
-                response = requests.request(method=method, url=url)
-                response.raise_for_status()
+                response = node._request('tx', txid, 'data', method=method)
                 if root_txid is None or root_txid == txid:
                     root_txid = txid
                     root_urls = txid_urls + txid_tmpurls + [':' + URI_PROTO + root_txid]
                 else:
                     root_urls = [':' + URI_PROTO + root_txid] #self.txid_urls(root_txid) + self.txid_tmpurls(root_txid)
                 root_txid = root_txid or txid
-                self._info(f'{txid} stalled at {url}')
+                self._info(f'{txid} stalled at {node.api_url}')
                 self._info(f'{key} {txid} uploaded at {self.key_urls_date(key, *root_urls)}')
                 return response
             except Exception as exc:
                 last_exc = exc
                 continue
+        #for url in txid_tmpurls:
+        #    try:
+        #        response = requests.request(method=method, url=url)
+        #        response.raise_for_status()
+        #        if root_txid is None or root_txid == txid:
+        #            root_txid = txid
+        #            root_urls = txid_urls + txid_tmpurls + [':' + URI_PROTO + root_txid]
+        #        else:
+        #            root_urls = [':' + URI_PROTO + root_txid] #self.txid_urls(root_txid) + self.txid_tmpurls(root_txid)
+        #        root_txid = root_txid or txid
+        #        self._info(f'{txid} stalled at {url}')
+        #        self._info(f'{key} {txid} uploaded at {self.key_urls_date(key, *root_urls)}')
+        #        return response
+        #    except Exception as exc:
+        #        last_exc = exc
+        #        continue
         self._info('_txid_request ' + str(key) + ' ' + str(txid) + ': ' + str(last_exc))
         raise RemoteError('_txid_request ' + str(key) + ' ' + str(txid) + ': ' + str(last_exc))
 
@@ -492,8 +518,8 @@ class ArkbStorageRemote(SpecialRemote):
                     subfiles = {}
                     if response.headers.get('Content-Type', None) == 'application/x.arweave-manifest+json':
                         manifest = self._txid_request('GET', key, txid).json()
-                        filetxids = {key: value['id'] for key, value in manifest['paths']}
-                        index_file = manifest['index']
+                        filetxids = {key: value['id'] for key, value in manifest['paths'].items()}
+                        index_file = manifest['index']['path']
                         response = self._txid_request('GET', key, filetxids[index_file], root_txid=txid)
                         for subfile in response.text.split('\n'):
                             subfiles[subfile] = (filetxids[subfile], None)

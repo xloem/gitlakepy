@@ -2,7 +2,7 @@
 from distutils.core import setup
 
 setup(name='gitlake',
-      version='0.48',
+      version='0.49',
       description='Decentralized special remotes for git-annex',
       author='Karl Semich',
       author_email='0xloem@gmail.com',
@@ -23,6 +23,7 @@ setup(name='gitlake',
           'annexremote',
           'flock',
           'bitcoinx',
-          'graphene'
+          'graphene',
+          'pyarweave'
       ],
 )
