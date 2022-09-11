@@ -207,7 +207,7 @@ class ArkbStorageRemote(SpecialRemote):
 
     def finish(self):
         self.closed = True
-        self.tty = open('/dev/tty', 'wt')
+        self.tty = open('/dev/tty', 'wt', encoding='utf-8')
         if (hasattr(self, 'combine_to') and self.combine_to):
             if self.combined and any(self.combining.values()):
                 self.do_combine()
