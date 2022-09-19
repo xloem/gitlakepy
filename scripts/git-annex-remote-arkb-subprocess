@@ -485,7 +485,7 @@ class ArkbStorageRemote(SpecialRemote):
                 else:
                     root_urls = [':' + URI_PROTO + root_txid] #self.txid_urls(root_txid) + self.txid_tmpurls(root_txid)
                 root_txid = root_txid or txid
-                self._info(f'{txid} stalled at {node.api_url}')
+                self._info(f'{txid} stalled at {node.api_url}/tx/{txid}/data')
                 self._info(f'{key} {txid} uploaded at {self.key_urls_date(key, *root_urls)}')
                 return response
             except Exception as exc:
