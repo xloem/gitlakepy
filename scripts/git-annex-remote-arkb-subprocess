@@ -78,7 +78,7 @@ class ArkbStorageRemote(SpecialRemote):
 
         self._info('arkb ' + self.arkb('version').strip())
 
-        self.ar_gateways = [ar.Peer()]
+        self.ar_gateways = [ar.Peer(outgoing_connections = min(max_files // 8, ar.DEFAULT_REQUESTS_PER_MINUTE_LIMIT))]
         self.ar_peers = self.ar_gateways
 
         self.bundler = self.annex.getconfig('bundler')
@@ -98,8 +98,11 @@ class ArkbStorageRemote(SpecialRemote):
         self.params_deploy = (*self.params_deploy,'--timeout', str(int(float(self.timeout) * 1000)))
 
         self.combine_to = self.annex.getconfig('combine-to-bytes')
-        if self.combine_to == '' and self.bundler:
-            self.combine_to = 100000 * 32
+        if not self.combine_to:
+            #if self.bundler:
+            #    self.combine_to = 100000 * 32
+            #else:
+                self.combine_to = 0
         self.combining = {}
         self.combined = 0
         self.combined_pathnames = 0
@@ -144,7 +147,7 @@ class ArkbStorageRemote(SpecialRemote):
             'deploy',
             self.combining_dir,
             *keytagparams,
-            '--concurrency', str(5 if len(self.combining) < 5 else max(len(self.combining), max_files//4)),
+            '--concurrency', str(5 if len(self.combining) < 5 else max(len(self.combining), max_files//8)),
             '--auto-confirm',
             '--index', index_filename,
             *self.params_deploy
@@ -237,7 +240,7 @@ class ArkbStorageRemote(SpecialRemote):
                 for offset in range(0, size, self.subchunk):
                     newfilename = str(offset)
                     data = file.read(self.subchunk)
-                    if self.combined + len(data) > self.combine_to or (self.combined_pathnames + len(newfilename)) * 56 + 77 + len('index.txt') > self.subchunk:
+                    if (self.combine_to and self.combined + len(data) > self.combine_to) or (self.combined_pathnames + len(newfilename)) * 56 + 77 + len('index.txt') > self.subchunk:
                         manifest_txid, file_txids = self.do_combine()
                         keytxids.update(file_txids)
                         self.annex.progress(progress)
@@ -410,7 +413,7 @@ class ArkbStorageRemote(SpecialRemote):
                 def get_stream(url):
                     return requests.get(url, stream=True)
                 with open(local_file, 'wb') as file:
-                    for response in concurrent.futures.ThreadPoolExecutor(max_workers=max(len(subfiles), max_files//4)).map(requests.get, subfiles.values()):
+                    for response in concurrent.futures.ThreadPoolExecutor(max_workers=max(len(subfiles), max_files//8)).map(requests.get, subfiles.values()):
                         url = response.url
                         self._debug(url)
                         response = requests.get(url)
@@ -544,9 +547,9 @@ class ArkbStorageRemote(SpecialRemote):
                         return self._txid_request('HEAD', key, subtxid, root_txid=txid)
                     def get_subtx(params):
                         return self._txid_request('GET', key, *params, root_txid=txid)
-                    for response in concurrent.futures.ThreadPoolExecutor(max_workers=max(len(subfiles), max_files//4)).map(get_subtx, subfiles.values()):
+                    for response in concurrent.futures.ThreadPoolExecutor(max_workers=max(len(subfiles), 4)).map(get_subtx, subfiles.values()):
                         txids = response.text.split('\n')
-                        for inner_response in concurrent.futures.ThreadPoolExecutor(max_workers=max(len(txids), max_files//4)).map(check_subtx, txids):
+                        for inner_response in concurrent.futures.ThreadPoolExecutor(max_workers=max(len(txids), max_files//16)).map(check_subtx, txids):
                             pass
                 for missing_txid in missing_txids:
                     # speeds things up in the future if missing txids that get iterated are removed
