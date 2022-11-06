@@ -516,7 +516,10 @@ class ArkbStorageRemote(SpecialRemote):
         #        last_exc = exc
         #        continue
         self._info('_txid_request ' + str(key) + ' ' + str(txid) + ': ' + str(last_exc))
-        raise RemoteError('_txid_request ' + str(key) + ' ' + str(txid) + ': ' + str(last_exc))
+        # removed RemoteError here so calling function can extract status code, hacky
+        #raise RemoteError('_txid_request ' + str(key) + ' ' + str(txid) + ': ' + str(last_exc))
+        last_exc.args = (*last_exc.args, key, txid)
+        raise last_exc
 
     def checkpresent(self, key):
         if self.combine_to and key in self.combining:
@@ -564,10 +567,12 @@ class ArkbStorageRemote(SpecialRemote):
                 missing_txids.append(txid)
                 last_exc = exc
                 continue
-        if hasattr(last_exc, 'response') and last_exc.response.status_code == 404:
+        if (hasattr(last_exc, 'response') and last_exc.response.status_code == 404) or (len(last_exc.args) > 2 and last_exc.args[1] == 404):
             # we could also just drop it, or git-annex might retain the failure, maybe if ownership is claimed of the url
             self._info(f'remove and readd {key} from this remote to hide this failure. data is reused if the same machine is used to reupload.')
         elif last_exc is not None:
+            if not isinstance(last_exc, RemoteError):
+                last_exc = RemoteError(type(last_exc).__name__ + ' ' + '; '.join((repr(arg) for arg in last_exc.args)))
             raise last_exc
         return False
 
