@@ -19,6 +19,18 @@ try:
 except ValueError:
     max_files = 1024
 
+def requests_get_workaround(*params, **kwparams):
+    '''works around ClosedPoolError by retrying https://github.com/urllib3/urllib3/issues/951'''
+    while True:
+        try:
+            return requests_get(*params, **kwparams)
+        except requests.ConnectionError as exc:
+            if len(exc.args) > 0 and type(exc.args[0]) is requests.urllib3.exceptions.ClosedPoolError:
+                continue
+            raise
+requests_get = requests.get
+requests.get = requests_get_workaround
+
 class ArkbStorageRemote(SpecialRemote):
     def __init__(self, annex):
         super().__init__(annex)
