@@ -8,6 +8,7 @@ import concurrent.futures
 import datetime
 import json, os, random, resource, shutil, subprocess, sys, time
 import re, requests
+import tqdm
 
 ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 
@@ -394,7 +395,7 @@ class ArkbStorageRemote(SpecialRemote):
 
         size = 0
 
-        with requests.get(url, stream=True) as stream:
+        with requests_get_workaround(url, stream=True, timeout=0.5) as stream:
             stream.raise_for_status()
             # manifest from bundler node indicating folder
             # or '/' trailing url from gateway indicating folder
@@ -468,7 +469,6 @@ class ArkbStorageRemote(SpecialRemote):
         return [url.split('/',3)[-1] for url in (*self.annex.geturls(key, self.gateway + '/'), *self.annex.geturls(key, URI_PROTO))]
 
     def _txid_request(self, method, key, txid, subdir='', root_txid=None):
-        #self._debug(f'{key} {method} {txid}')
         if subdir is None:
             subdir = ''
         txid_urls = self.txid_urls(txid)
@@ -483,6 +483,7 @@ class ArkbStorageRemote(SpecialRemote):
         #        continue
         for gateway in self.ar_gateways:
             try:
+                #self._debug(f'{key} {gateway.api_url} {method} {txid}')
                 response = gateway._request(txid + subdir, method=method)
                 return response
             except Exception as exc:
@@ -562,9 +563,9 @@ class ArkbStorageRemote(SpecialRemote):
                         return self._txid_request('HEAD', key, subtxid, root_txid=txid)
                     def get_subtx(params):
                         return self._txid_request('GET', key, *params, root_txid=txid)
-                    for response in concurrent.futures.ThreadPoolExecutor(max_workers=min(len(subfiles), 4)).map(get_subtx, subfiles.values()):
+                    for response in concurrent.futures.ThreadPoolExecutor(max_workers=min(len(subfiles), 4)).map(get_subtx, tqdm.tqdm(subfiles.values(), leave=False)):
                         txids = response.text.split('\n')
-                        for inner_response in concurrent.futures.ThreadPoolExecutor(max_workers=min(len(txids), max_files//8)).map(check_subtx, txids):
+                        for inner_response in concurrent.futures.ThreadPoolExecutor(max_workers=min(len(txids), max_files//8)).map(check_subtx, tqdm.tqdm(txids, leave=False)):
                             pass
                 for missing_txid in missing_txids:
                     # speeds things up in the future if missing txids that get iterated are removed
