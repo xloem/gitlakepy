@@ -535,8 +535,8 @@ class ArkbStorageRemote(SpecialRemote):
         raise last_exc
 
     def checkpresent(self, key):
-        if self.combine_to and key in self.combining:
-            return True
+        #if self.combine_to and key in self.combining:
+        #    return True
         last_exc = None
         missing_txids = []
         for txid in self.txids(key):
