@@ -91,9 +91,6 @@ class ArkbStorageRemote(SpecialRemote):
 
         self._info('arkb ' + self.arkb('version').strip())
 
-        self.ar_gateways = [ar.Peer(outgoing_connections = min(max_files // 4, ar.DEFAULT_REQUESTS_PER_MINUTE_LIMIT))]
-        self.ar_peers = self.ar_gateways
-
         self.bundler = self.annex.getconfig('bundler')
         if self.bundler:
             self.params_deploy = (*self.params_deploy, '--use-bundler', self.bundler)
@@ -109,6 +106,10 @@ class ArkbStorageRemote(SpecialRemote):
         if not self.timeout:
             self.timeout = str(2147483646 / 1000)
         self.params_deploy = (*self.params_deploy,'--timeout', str(int(float(self.timeout) * 1000)))
+
+        # looks like i meant have been considering using all the gateways here
+        self.ar_gateways = [ar.Peer(api_url = self.gateway, outgoing_connections = min(max_files // 4, ar.DEFAULT_REQUESTS_PER_MINUTE_LIMIT))]
+        self.ar_peers = self.ar_gateways
 
         self.combine_to = self.annex.getconfig('combine-to-bytes')
         if not self.combine_to:
