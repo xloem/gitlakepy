@@ -98,6 +98,8 @@ class ArkbStorageRemote(SpecialRemote):
         else:
             self.bundlr_nodes = []
         self.gateway = self.annex.getconfig('gateway')
+        if 'ARWEAVE_GATEWAY' in os.environ:
+            self.gateway = os.environ['ARWEAVE_GATEWAY']
         if not self.gateway:
             self.gateway = 'https://arweave.net'
         else:
