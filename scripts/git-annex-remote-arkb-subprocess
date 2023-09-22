@@ -487,7 +487,7 @@ class ArkbStorageRemote(SpecialRemote):
         for gateway in self.ar_gateways:
             try:
                 #self._debug(f'{key} {gateway.api_url} {method} {txid}')
-                response = gateway._request(txid + subdir, method=method, allow_redirects=True)
+                response = gateway._request(txid + subdir, method=method)
                 return response
             except Exception as exc:
                 ar.logger.error(f'{gateway.api_url}/{txid+subdir}: ' + str(exc))
@@ -561,6 +561,7 @@ class ArkbStorageRemote(SpecialRemote):
                         for subfile in response.text.split('\n'):
                             subfiles[subfile] = (txid, '/' + subfile)
                     self._debug(str(subfiles))
+                    total_length = 0
                     # note: subfiles has only the txid, not the whole url
                     def check_subtx(subtxid):
                         return self._txid_request('HEAD', key, subtxid, root_txid=txid)
@@ -569,6 +570,11 @@ class ArkbStorageRemote(SpecialRemote):
                     for response in concurrent.futures.ThreadPoolExecutor(max_workers=min(len(subfiles), 4)).map(get_subtx, tqdm.tqdm(subfiles.values(), leave=False)):
                         txids = response.text.split('\n')
                         for inner_response in concurrent.futures.ThreadPoolExecutor(max_workers=min(len(txids), max_files//8)).map(check_subtx, tqdm.tqdm(txids, leave=False)):
+                            if 'Content-Length' in r.headers:
+                                if total_length is not None:
+                                    total_length += r.headers['Content-Length']
+                            else:
+                                total_length = None
                             pass
                 for missing_txid in missing_txids:
                     # speeds things up in the future if missing txids that get iterated are removed
