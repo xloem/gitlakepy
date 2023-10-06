@@ -487,7 +487,7 @@ class ArkbStorageRemote(SpecialRemote):
         for gateway in self.ar_gateways:
             try:
                 #self._debug(f'{key} {gateway.api_url} {method} {txid}')
-                response = gateway._request(txid + subdir, method=method)
+                response = gateway._request(txid + subdir, method=method, allow_redirects=True)
                 return response
             except Exception as exc:
                 ar.logger.error(f'{gateway.api_url}/{txid+subdir}: ' + str(exc))
@@ -542,6 +542,7 @@ class ArkbStorageRemote(SpecialRemote):
         #    return True
         last_exc = None
         missing_txids = []
+        expected_length = self.keysize(key)
         for txid in self.txids(key):
             try:
                 response = self._txid_request('HEAD', key, txid)
@@ -570,12 +571,13 @@ class ArkbStorageRemote(SpecialRemote):
                     for response in concurrent.futures.ThreadPoolExecutor(max_workers=min(len(subfiles), 4)).map(get_subtx, tqdm.tqdm(subfiles.values(), leave=False)):
                         txids = response.text.split('\n')
                         for inner_response in concurrent.futures.ThreadPoolExecutor(max_workers=min(len(txids), max_files//8)).map(check_subtx, tqdm.tqdm(txids, leave=False)):
-                            if 'Content-Length' in r.headers:
+                            if 'Content-Length' in inner_response.headers:
                                 if total_length is not None:
-                                    total_length += r.headers['Content-Length']
+                                    total_length += inner_response.headers['Content-Length']
                             else:
                                 total_length = None
                             pass
+                assert total_length is None or total_length == keysize
                 for missing_txid in missing_txids:
                     # speeds things up in the future if missing txids that get iterated are removed
                     # this is only done if the item is found among a different one
@@ -744,6 +746,30 @@ class ArkbStorageRemote(SpecialRemote):
         finally:
             proc.terminate()
         return None
+    def keysize(self, key):
+        keymetadata = key.split('--')[0]
+        if keymetadata.find('-s') != -1:
+          filesize = int(keymetadata.split('-s')[1].split('-')[0])
+        else:
+          filesize = None
+        if keymetadata.find('-S') != -1:
+          chunksize = int(keymetadata.split('-S')[1].split('-')[0])
+        else:
+          chunksize = None
+        if filesize is None:
+          filesize = chunksize
+        elif chunksize is not None:
+          if chunksize > filesize:
+            temp = chunksize
+            chunksize = filesize
+            filesize = temp
+          chunk = int(keymetadata.split('-C')[1].split('-')[0])
+          if chunk * chunksize > filesize:
+            filesize = filesize % chunksize
+          else:
+            filesize = chunksize
+        self._debug('calculated keysize of ' + str(filesize) + ' from ' + key)
+        return filesize
 
 if __name__ == '__main__':
     main = Main()
