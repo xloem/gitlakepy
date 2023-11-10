@@ -24,6 +24,6 @@ setup(name='gitlake',
           'flock',
           'bitcoinx',
           'graphene',
-          'pyarweave'
+          'pyarweave @ git+https://github.com/xloem/pyarweave'
       ],
 )
