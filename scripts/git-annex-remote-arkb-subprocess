@@ -3,10 +3,11 @@
 from annexremote import Master as Main, SpecialRemote, RemoteError, UnsupportedRequest
 
 import ar, bundlr
+import joblib
 
 import concurrent.futures
 import datetime
-import json, os, random, resource, shutil, subprocess, sys, time
+import curses, json, os, psutil, random, resource, shutil, subprocess, sys, time
 import re, requests
 import tqdm
 
@@ -15,10 +16,21 @@ ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 TXID_LEN = 43
 URI_PROTO = 'arkb-subprocess://'
 
+# to show a progress meter full-width
+for parent_process in psutil.Process().parents():
+    if 'git' in parent_process.name():
+        fd = os.open('/proc/%s/fd/1' % parent_process.pid, 0)
+        if os.isatty(fd):
+            curses.setupterm(fd=fd)
+            break
+        else:
+            os.close(fd)
+
 try:
     max_files, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
 except ValueError:
     max_files = 1024
+this_process = psutil.Process()
 
 def requests_get_workaround(*params, **kwparams):
     '''works around ClosedPoolError by retrying https://github.com/urllib3/urllib3/issues/951'''
@@ -45,6 +57,17 @@ class ArkbStorageRemote(SpecialRemote):
         }
         self.local_dir = None
         self.closed = False
+        self._tqdm_buf = ''
+
+    # for tqdm
+    def write(self, str):
+        self._tqdm_buf += str
+    def flush(self):
+        UP='\x1b\x4d' # tput cuu1
+        RIGHT='\x1b\x5b\x43' # tput cuf1
+        LEFT='\x08' # tput cub1
+        self._info(UP + UP + self._tqdm_buf)
+        self._tqdm_buf = ''
 
     def initremote(self):
 		# initialize in repo, e.g. create folders or change settings
@@ -86,22 +109,26 @@ class ArkbStorageRemote(SpecialRemote):
                 os.rename(tmp_wallet_path, self.wallet_path)
             self.params_deploy = ('--wallet', self.wallet_path, '--no-colors')
         else:
-            self.wallet_path = ''
+            self.wallet_path = os.path.join(self.local_dir, 'wallet.json')
+            if not os.path.exists(self.wallet_path):
+                self.wallet = ar.Wallet.generate(jwk_file = self.wallet_path)
             self.params_deploy = ('--no-colors',)
+        self.wallet = ar.Wallet(self.wallet_path)
 
-        self._info('arkb ' + self.arkb('version').strip())
+        #self._info('arkb ' + self.arkb('version').strip())
 
         self.bundler = self.annex.getconfig('bundler')
         if self.bundler:
             self.params_deploy = (*self.params_deploy, '--use-bundler', self.bundler)
-            self.bundlr_nodes = [bundlr.Node(self.bundler)]
+            self.bundlr_nodes = [bundlr.Node(self.bundler, outgoing_connections = self.available_fh() // 8)]
         else:
             self.bundlr_nodes = []
         self.gateway = self.annex.getconfig('gateway')
         if 'ARWEAVE_GATEWAY' in os.environ:
             self.gateway = os.environ['ARWEAVE_GATEWAY']
         if not self.gateway:
-            self.gateway = 'https://arweave.net'
+            #self.gateway = 'https://arweave.net'
+            self.gateway = 'https://optimysthic.site' # pyarweave/toys/gateways.py [txid]
         else:
             self.params_deploy = (*self.params_deploy,'--gateway', self.gateway)
         self.timeout = self.annex.getconfig('timeout')
@@ -110,7 +137,7 @@ class ArkbStorageRemote(SpecialRemote):
         self.params_deploy = (*self.params_deploy,'--timeout', str(int(float(self.timeout) * 1000)))
 
         # looks like i meant have been considering using all the gateways here
-        self.ar_gateways = [ar.Peer(api_url = self.gateway, outgoing_connections = min(max_files // 4, ar.DEFAULT_REQUESTS_PER_MINUTE_LIMIT))]
+        self.ar_gateways = [ar.Peer(api_url = self.gateway, outgoing_connections = min(self.available_fh() // 8, ar.DEFAULT_REQUESTS_PER_MINUTE_LIMIT))]
         self.ar_peers = self.ar_gateways
 
         self.combine_to = self.annex.getconfig('combine-to-bytes')
@@ -153,42 +180,45 @@ class ArkbStorageRemote(SpecialRemote):
         if tags:
             tags_dict = tags_dict.copy()
             tags_dict.update(tags)
-        keytagparams = []
-        for name, value in tags_dict.items():
-            keytagparams.extend((
-                '--tag-name', name,
-                '--tag-value', value
-            ))
-        output = self.arkb(
-            'deploy',
-            self.combining_dir,
-            *keytagparams,
-            '--concurrency', str(5 if len(self.combining) < 5 else min(len(self.combining), max_files//4)),
-            '--auto-confirm',
-            '--index', index_filename,
-            *self.params_deploy
-        )
-        manifest_filename = os.path.join(self.combining_dir, 'manifest.arkb')
-        if not os.path.exists(manifest_filename):
-            for path in self.combining.keys():
-                manifest_filename = os.path.join(self.combining_dir, os.path.dirname(path), 'manifest.arkb')
-                if os.path.exists(manifest_filename):
-                    break
-        if not os.path.exists(manifest_filename):
-            self.combined = 0 # to quickly prevent cleanup during debugging
-            self.combined_pathnames = 0
-            self.combining_dir = self.combining_dir + '_'
-            raise RemoteError(f'not found on fs after arkb deploy: {manifest_filename}')
-        lines = output.split('\n')
-        self._debug('lines[-3] = ' + repr(lines[-3]))
-        self._debug('lines[-2] = ' + repr(lines[-2]))
-        self._debug('lines[-1] = ' + repr(lines[-1]))
-        manifest_txid = lines[-2].split('/')[-1]
-        with open(manifest_filename) as manifest_file:
-            manifest = json.load(manifest_file)
+        manifest, bundlr_result = self.deploy(self.combining_dir, tags_dict, index_filename)
+        manifest_txid = bundlr_result['id']
+        #keytagparams = []
+        #for name, value in tags_dict.items():
+        #    keytagparams.extend((
+        #        '--tag-name', name,
+        #        '--tag-value', value
+        #    ))
+        #output = self.arkb(
+        #    'deploy',
+        #    self.combining_dir,
+        #    *keytagparams,
+        #    '--concurrency', str(5 if len(self.combining) < 5 else min(len(self.combining), max_files//4)),
+        #    '--auto-confirm',
+        #    '--index', index_filename,
+        #    *self.params_deploy
+        #)
+        #manifest_filename = os.path.join(self.combining_dir, 'manifest.arkb')
+        #if not os.path.exists(manifest_filename):
+        #    for path in self.combining.keys():
+        #        manifest_filename = os.path.join(self.combining_dir, os.path.dirname(path), 'manifest.arkb')
+        #        if os.path.exists(manifest_filename):
+        #            break
+        #if not os.path.exists(manifest_filename):
+        #    self.combined = 0 # to quickly prevent cleanup during debugging
+        #    self.combined_pathnames = 0
+        #    self.combining_dir = self.combining_dir + '_'
+        #    raise RemoteError(f'not found on fs after arkb deploy: {manifest_filename}')
+        #lines = output.split('\n')
+        #self._debug('lines[-3] = ' + repr(lines[-3]))
+        #self._debug('lines[-2] = ' + repr(lines[-2]))
+        #self._debug('lines[-1] = ' + repr(lines[-1]))
+        #manifest_txid = lines[-2].split('/')[-1]
+        #with open(manifest_filename) as manifest_file:
+        #    manifest = json.load(manifest_file)
         key_urls = []
         file_txids = {}
-        for key, props in manifest['paths'].items():
+        for key, props in manifest.path_txids.items():
+        #for key, props in manifest['paths'].items():
             txid = props['id']
             file_txids[key] = txid
             self._debug(f'{key}: {self.gateway}/{txid}')
@@ -250,7 +280,7 @@ class ArkbStorageRemote(SpecialRemote):
         if self.subchunk and size > self.subchunk:
             new_subdir = key
             new_fulldir = os.path.join(self.combining_dir, new_subdir); os.makedirs(new_fulldir, exist_ok=True)
-            progress = 0
+            self.progress = 0
             with open(filename, 'rb') as file:
                 keytxids = {}
                 for offset in range(0, size, self.subchunk):
@@ -259,9 +289,9 @@ class ArkbStorageRemote(SpecialRemote):
                     if (self.combine_to and self.combined + len(data) > self.combine_to) or (self.combined_pathnames + len(newfilename)) * 56 + 77 + len('index.txt') > self.subchunk:
                         manifest_txid, file_txids = self.do_combine()
                         keytxids.update(file_txids)
-                        self.annex.progress(progress)
+                   #     self.annex.progress(progress)
                         new_fulldir = os.path.join(self.combining_dir, new_subdir); os.makedirs(new_fulldir, exist_ok=True)
-                    progress += len(data)
+                    #progress += len(data)
                     self.combined += len(data)
                     self.combined_pathnames += len(os.path.join(new_subdir, newfilename))
                     self.combining[new_subdir + '/' + newfilename] = False
@@ -304,7 +334,7 @@ class ArkbStorageRemote(SpecialRemote):
 
             self.annex.seturipresent(key, URI_PROTO + manifest_txid)
 
-            self.annex.progress(progress)
+            #self.annex.progress(progress)
         elif self.combine_to and size < self.combine_to:
             if self.combined + size > self.combine_to:
                 self.do_combine()
@@ -326,32 +356,42 @@ class ArkbStorageRemote(SpecialRemote):
             }
             keyparts['backend'] = keybackend
             keyparts['name'] = keyname
-            keytagparams = []
-            for name, value in keyparts.items():
-                keytagparams.extend((
-                    '--tag-name', 'git-annex-key-' + name,
-                    '--tag-value', value
-                ))
-            keytagparams.extend((
-                    '--tag-name', 'IPFS-Add',
-                    '--tag-value', key,
-                    '--tag-name', 'git-annex-key',
-                    '--tag-value', key,
-            ))
-            output = self.arkb(
-                    'deploy',
-                    filename,
-                    *keytagparams,
-                    '--auto-confirm',
-                    *self.params_deploy
-            )
-            if 'Failed to deploy' in output:
-                raise RemoteError(output.replace('\n', ' '))
-            lines = output.split('\n')
-            self._debug('lines[-3] = ' + repr(lines[-3]))
-            self._debug('lines[-2] = ' + repr(lines[-2]))
-            self._debug('lines[-1] = ' + repr(lines[-1]))
-            txid = lines[-2].split('/')[-1]
+            bundlr_output = self.deploy(filename, {
+                **{
+                    'git-annex-key-' + name: value
+                    for name, value in keyparts.items()
+                }, **{
+                    'IPFS-Add': key,
+                    'git-annex-key': key,
+                }
+            })
+            txid = bundlr_output['id']
+            #keytagparams = []
+            #for name, value in keyparts.items():
+            #    keytagparams.extend((
+            #        '--tag-name', 'git-annex-key-' + name,
+            #        '--tag-value', value
+            #    ))
+            #keytagparams.extend((
+            #        '--tag-name', 'IPFS-Add',
+            #        '--tag-value', key,
+            #        '--tag-name', 'git-annex-key',
+            #        '--tag-value', key,
+            #))
+            #output = self.arkb(
+            #        'deploy',
+            #        filename,
+            #        *keytagparams,
+            #        '--auto-confirm',
+            #        *self.params_deploy
+            #)
+            #if 'Failed to deploy' in output:
+            #    raise RemoteError(output.replace('\n', ' '))
+            #lines = output.split('\n')
+            #self._debug('lines[-3] = ' + repr(lines[-3]))
+            #self._debug('lines[-2] = ' + repr(lines[-2]))
+            #self._debug('lines[-1] = ' + repr(lines[-1]))
+            #txid = lines[-2].split('/')[-1]
             for url in self.txid_urls(txid):
                 self.annex.seturlpresent(key, url)
             for uri in self.txid_uris(txid):
@@ -429,7 +469,7 @@ class ArkbStorageRemote(SpecialRemote):
                 def get_stream(url):
                     return requests.get(url, stream=True)
                 with open(local_file, 'wb') as file:
-                    for response in concurrent.futures.ThreadPoolExecutor(max_workers=min(len(subfiles), max_files//4)).map(requests.get, subfiles.values()):
+                    for response in concurrent.futures.ThreadPoolExecutor(max_workers=min(len(subfiles), self.available_fh()//8)).map(requests.get, subfiles.values()):
                         url = response.url
                         self._debug(url)
                         response = requests.get(url)
@@ -548,6 +588,7 @@ class ArkbStorageRemote(SpecialRemote):
                 response = self._txid_request('HEAD', key, txid)
                 self._debug(response.url + ': ' + response.headers.get('Content-Type', 'no Content-Type header'))
                 if response.headers.get('Content-Type', None) == 'application/x.arweave-manifest+json' or response.url[-1] == '/':
+                    total_length = 0
                     '''this is a split file, ensure all the parts exist'''
                     subfiles = {}
                     if response.headers.get('Content-Type', None) == 'application/x.arweave-manifest+json':
@@ -559,25 +600,43 @@ class ArkbStorageRemote(SpecialRemote):
                             subfiles[subfile] = (filetxids[subfile], None)
                     else:
                         response = self._txid_request('GET', key, txid)
-                        for subfile in response.text.split('\n'):
+                        for idx, subfile in enumerate(response.text.split('\n')):
                             subfiles[subfile] = (txid, '/' + subfile)
                     self._debug(str(subfiles))
-                    total_length = 0
+                    max_found_length = None
                     # note: subfiles has only the txid, not the whole url
                     def check_subtx(subtxid):
                         return self._txid_request('HEAD', key, subtxid, root_txid=txid)
                     def get_subtx(params):
                         return self._txid_request('GET', key, *params, root_txid=txid)
-                    for response in concurrent.futures.ThreadPoolExecutor(max_workers=min(len(subfiles), 4)).map(get_subtx, tqdm.tqdm(subfiles.values(), leave=False)):
+                    curses.update_lines_cols()
+                    with tqdm.tqdm(total=expected_length, leave=False, file=self, desc='visiting', unit='B', unit_scale=True, unit_divisor=1024, ncols=curses.COLS or 80) as pbar:
+                      for response_idx, response in enumerate(concurrent.futures.ThreadPoolExecutor(max_workers=min(len(subfiles), 4)).map(get_subtx, subfiles.values())):
                         txids = response.text.split('\n')
-                        for inner_response in concurrent.futures.ThreadPoolExecutor(max_workers=min(len(txids), max_files//8)).map(check_subtx, tqdm.tqdm(txids, leave=False)):
+                        for inner_idx, inner_response in enumerate(concurrent.futures.ThreadPoolExecutor(max_workers=min(len(txids), self.available_fh()//16)).map(check_subtx, txids)):
+                            curses.update_lines_cols()
+                            pbar.ncols = curses.COLS or 80
                             if 'Content-Length' in inner_response.headers:
                                 if total_length is not None:
-                                    total_length += inner_response.headers['Content-Length']
+                                    content_length = int(inner_response.headers['Content-Length'])
+                                    total_length += content_length
+                                    #self._debug(f'{total_length} / {expected_length}')
+                                    pbar.update(content_length)
                             else:
                                 total_length = None
-                            pass
-                assert total_length is None or total_length == keysize
+                            if total_length is None:
+                                pbar.desc = f'visiting {response_idx}/{len(subfiles)},{inner_idx}/{len(txids)}(guess as gw lacks content-length)'
+                                pbar.update(expected_length / len(subfiles) / len(txids))
+                            else:
+                                pbar.desc = f'visiting {response_idx}/{len(subfiles)},{inner_idx}/{len(txids)}'
+                else:
+                    if 'Content-Length' in response.headers:
+                        total_length = int(response.headers['Content-Length'])
+                    else:
+                        total_length = None
+                self._debug(f'all parts for {txid} exist, checking {repr(total_length)} == {repr(expected_length)}')
+                assert total_length is None or total_length == expected_length
+                self._debug(f'success {repr(total_length)} == {repr(expected_length)}')
                 for missing_txid in missing_txids:
                     # speeds things up in the future if missing txids that get iterated are removed
                     # this is only done if the item is found among a different one
@@ -592,7 +651,7 @@ class ArkbStorageRemote(SpecialRemote):
                 last_exc = exc
                 continue
         if last_exc is not None:
-            if (hasattr(last_exc, 'response') and last_exc.response.status_code == 404) or (len(last_exc.args) > 2 and last_exc.args[1] == 404):
+            if (hasattr(last_exc, 'response') and last_exc.response.status_code == 404) or (len(last_exc.args) > 2 and last_exc.args[1] == 404) or isinstance(last_exc, AssertionError):
                 # we could also just drop it, or git-annex might retain the failure, maybe if ownership is claimed of the url
                 self._info(f'remove and readd {key} from this remote to hide this failure. data is reused if the same machine is used to reupload.')
             else:
@@ -630,54 +689,55 @@ class ArkbStorageRemote(SpecialRemote):
     #        cid = item['cid']
     #        return ' '.join((self.cid_uris(cid)))
 
-    def arkb(self, *params, input=None, backoff_secs=8, retries=10):
-        try:
-            self._debug('arkb ' + ' '.join((str(param) for param in params)))
-            cmd = [*os.environ.get('ARKB', 'arkb').split(' '), *params]
-            result = subprocess.run(
-                cmd,
-                env={**os.environ, 'HOME':self.local_dir},
-                input=input,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                check=True,
-                text=True
-            )
-            stdout = ansi_escape.sub('', result.stdout)
-            if 'Failed to deploy' in stdout:
-                raise subprocess.CalledProcessError(0, cmd[0], output=result.stdout, stderr=result.stderr)
-            stderr = ansi_escape.sub('', result.stderr)
-            for line in stdout.split('\n'):
-                self._debug(line[:80])
-            for line in stderr.split('\n'):
-                self._debug(line[:80])
-            self._debug('PROCESS SUCCESS arkb ' + ' '.join(params))
-        except subprocess.CalledProcessError as err:
-            #self.confirmed = 0 # don't clean up state
-            self._info('err: arkb ' + ' '.join(params) + repr(err))
-            stdout = ansi_escape.sub('', err.stdout)
-            stderr = ansi_escape.sub('', err.stderr)
-            for line in stdout.split('\n'):
-                self._info(line[:80])
-            for line in stderr.split('\n'):
-                self._info(line[:80])
-            if retries and 'toJSON' in (stdout + stderr):# or 'Too Many Requests' in err.stdout:
-                delay = backoff_secs + backoff_secs * random.random()
-                self._info(f'Waiting {int(delay+0.5)} seconds.')
-                for line in err.stdout.split('\n'):
-                    self._info(line)
-                for line in err.stderr.split('\n'):
-                    self._info(line)
-                time.sleep(delay)
-                self._info(f'Done waiting for {int(delay+0.5)} seconds.')
-                return self.arkb(*params, input=input, backoff_secs = delay, retries=retries-1)
-            elif 'EAI_AGAIN' in (stdout + stderr):
-                self._info(f'EAI_AGAIN')
-                return self.w3(*params, input=input, backoff_secs = backoff_secs,retries=retries)
-            elif retries:
-                return self.arkb(*params, input=input, backoff_secs=backoff_secs, retries=retries-1)
-            raise RemoteError((err.stdout + ' '  + err.stderr).replace('\n', ' '))
-        return stdout
+    #def arkb(self, *params, input=None, backoff_secs=8, retries=10):
+    #    try:
+    #        self._debug('arkb ' + ' '.join((str(param) for param in params)))
+    #        cmd = [*os.environ.get('ARKB', 'arkb').split(' '), *params]
+    #        result = subprocess.run(
+    #            cmd,
+    #            env={**os.environ, 'HOME':self.local_dir},
+    #            input=input,
+    #            stdout=subprocess.PIPE,
+    #            stderr=subprocess.PIPE,
+    #            check=True,
+    #            text=True
+    #        )
+    #        stdout = ansi_escape.sub('', result.stdout)
+    #        if 'Failed to deploy' in stdout:
+    #            raise subprocess.CalledProcessError(0, cmd[0], output=result.stdout, stderr=result.stderr)
+    #        stderr = ansi_escape.sub('', result.stderr)
+    #        for line in stdout.split('\n'):
+    #            self._debug(line[:80])
+    #        for line in stderr.split('\n'):
+    #            self._debug(line[:80])
+    #        self._debug('PROCESS SUCCESS arkb ' + ' '.join(params))
+    #    except subprocess.CalledProcessError as err:
+    #        #self.confirmed = 0 # don't clean up state
+    #        self._info('err: arkb ' + ' '.join(params) + repr(err))
+    #        stdout = ansi_escape.sub('', err.stdout)
+    #        stderr = ansi_escape.sub('', err.stderr)
+    #        for line in stdout.split('\n'):
+    #            self._info(line[:80])
+    #        for line in stderr.split('\n'):
+    #            self._info(line[:80])
+    #        if retries and 'toJSON' in (stdout + stderr):# or 'Too Many Requests' in err.stdout:
+    #            delay = backoff_secs + backoff_secs * random.random()
+    #            self._info(f'Waiting {int(delay+0.5)} seconds.')
+    #            for line in err.stdout.split('\n'):
+    #                self._info(line)
+    #            for line in err.stderr.split('\n'):
+    #                self._info(line)
+    #            time.sleep(delay)
+    #            self._info(f'Done waiting for {int(delay+0.5)} seconds.')
+    #            return self.arkb(*params, input=input, backoff_secs = delay, retries=retries-1)
+    #        elif 'EAI_AGAIN' in (stdout + stderr):
+    #            self._info(f'EAI_AGAIN')
+    #            return self.w3(*params, input=input, backoff_secs = backoff_secs,retries=retries)
+    #        elif retries:
+    #            return self.arkb(*params, input=input, backoff_secs=backoff_secs, retries=retries-1)
+    #        raise RemoteError((err.stdout + ' '  + err.stderr).replace('\n', ' '))
+    #    return stdout
+
     #def setup(self):
     #    subprocess.run(('w3', 
 
@@ -687,6 +747,42 @@ class ArkbStorageRemote(SpecialRemote):
     #    if '_git_annex_just_put' in item:
     #        result.add('JustPut')
     #    return result
+    def deploy(self, path, tags, index_filename=None):
+        random.shuffle(self.bundlr_nodes)
+        node = self.bundlr_nodes[0]
+        if os.path.isdir(path):
+            node.max_outgoing_connections = self.available_fh()
+            fns = [os.path.join(subpath, subfile)[len(path):].replace('\\','/').lstrip('/') for subpath, subdirs, subfiles in os.walk(path) for subfile in subfiles]
+            #self._debug(path)
+            #for fn in fns:
+            #    self._debug(os.path.join(path,fn))
+            #    assert os.path.exists(os.path.join(path,fn))
+            def upload(fn):
+                with open(os.path.join(path, fn), 'rb') as f:
+                    di = ar.DataItem(data=f.read())
+                di.sign(self.wallet.rsa)
+                result = node.send_tx(di.tobytes())
+                return fn, len(di.data), result
+            tasks = joblib.Parallel(n_jobs = self.available_fh() // 8, backend='threading', return_as='generator_unordered')(joblib.delayed(upload)(fn) for fn in fns)
+            fn_results = []
+            for fn_result in tasks:
+                fn, datalen, result = fn_result
+                fn_results.append([fn, result])
+                fnparts = fn.split('/')
+                if fnparts[-1].isdigit() and len(fnparts) > 1:
+                    self.progress += datalen
+                    self.annex.progress(self.progress)
+            manifest = ar.Manifest(dict(fn_results), index=index_filename)
+            di = ar.DataItem(data = manifest.tobytes(), header = ar.ANS104DataItemHeader(tags = manifest.totags() + ar.utils.dict_to_tags(tags)))
+            di.sign(self.wallet.rsa)
+            result = node.send_tx(di.tobytes())
+            return manifest, result
+        else:
+            with open(path, 'rb') as f:
+                di = ar.DataItem(data = f.read(), header = ar.ANS104DataItemHeader(tags = ar.utils.dict_to_tags(tags)))
+            di.sign(self.wallet.rsa)
+            result = node.send_tx(di.tobytes())
+            return result
 
     def key_urls_date(self, key, *urls):
         dirhash_lower = self.annex.dirhash_lower(key)
@@ -771,11 +867,28 @@ class ArkbStorageRemote(SpecialRemote):
         self._debug('calculated keysize of ' + str(filesize) + ' from ' + key)
         return filesize
 
+    def available_fh(self):
+        open_files = this_process.open_files()
+        connections = psutil.net_connections()
+        used_fh = len(open_files) + len(connections)
+        avail_fh = max_files - used_fh
+        self._debug(f'{used_fh} filehandles open leaving {avail_fh} available')
+        for file in open_files:
+            self._debug(file)
+        for conn in connections:
+            self._debug(conn)
+        assert avail_fh
+        return 16#avail_fh
+
 if __name__ == '__main__':
+    if 'DBG_INPUT' in os.environ:
+        input = open(os.environ['DBG_INPUT'])
+    else:
+        input = sys.stdin
     main = Main()
     remote = ArkbStorageRemote(main)
     main.LinkRemote(remote)
     try:
-        main.Listen()
+        main.Listen(input=input)
     finally:
         remote.finish()
