@@ -38,7 +38,7 @@ class GitAnnexESRP(threading.Thread):
         try:
           handler = getattr(self, 'on' + command)
           if args != None:
-            argspec = inspect.getargspec(handler)
+            argspec = inspect.getfullargspec(handler)
             if argspec[1] != None:
               nArgs = -1
             else:
